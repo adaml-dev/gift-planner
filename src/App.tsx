@@ -36,6 +36,8 @@ interface Occasion {
   created_at: string;
   is_archived?: boolean;
   invited_user_ids?: string[];
+  is_draft?: boolean;
+  draft_allowed_user_ids?: string[];
 }
 
 interface Gift {
@@ -80,6 +82,7 @@ function App() {
   const [pinError, setPinError] = useState('');
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
+  const [initializing, setInitializing] = useState(true);
 
   // App navigation & core state
   const [view, setView] = useState<'dashboard' | 'occasion'>('dashboard');
@@ -106,6 +109,8 @@ function App() {
   const [newOccasionGoogleMapsUrl, setNewOccasionGoogleMapsUrl] = useState('');
   const [newOccasionDesc, setNewOccasionDesc] = useState('');
   const [newOccasionInvitedIds, setNewOccasionInvitedIds] = useState<string[]>([]);
+  const [newOccasionIsDraft, setNewOccasionIsDraft] = useState(true);
+  const [newOccasionDraftAllowedIds, setNewOccasionDraftAllowedIds] = useState<string[]>([]);
 
   const [showGiftModal, setShowGiftModal] = useState(false);
   const [newGiftName, setNewGiftName] = useState('');
@@ -144,14 +149,27 @@ function App() {
 
 
 
-  // 1. Monitor Auth status
+  // 1. Monitor Auth status & Initialize App
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setUser(session.user);
-        syncProfile(session.user);
+    const initApp = async () => {
+      // 1. Fetch profiles first
+      await fetchProfiles();
+      
+      // 2. Get auth session
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          setUser(session.user);
+          await syncProfile(session.user);
+        }
+      } catch (e) {
+        console.error('Error fetching session:', e);
+      } finally {
+        setInitializing(false);
       }
-    });
+    };
+
+    initApp();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
@@ -164,11 +182,6 @@ function App() {
     });
 
     return () => subscription.unsubscribe();
-  }, []);
-
-  // 2. Fetch profiles immediately on mount, and occasions when user is logged in
-  useEffect(() => {
-    fetchProfiles();
   }, []);
 
   useEffect(() => {
@@ -502,6 +515,8 @@ function App() {
     setNewOccasionGoogleMapsUrl('');
     setNewOccasionDesc('');
     setNewOccasionInvitedIds([]);
+    setNewOccasionIsDraft(true);
+    setNewOccasionDraftAllowedIds([]);
   };
 
   const closeOccasionModal = () => {
@@ -514,6 +529,8 @@ function App() {
     setEditingOccasion(null);
     clearOccasionForm();
     setNewOccasionInvitedIds(Object.keys(profiles));
+    setNewOccasionIsDraft(true);
+    setNewOccasionDraftAllowedIds([]);
     setShowOccasionModal(true);
   };
 
@@ -529,6 +546,8 @@ function App() {
     setNewOccasionGoogleMapsUrl(occ.google_maps_url || '');
     setNewOccasionDesc(occ.description || '');
     setNewOccasionInvitedIds(occ.invited_user_ids || Object.keys(profiles));
+    setNewOccasionIsDraft(occ.is_draft || false);
+    setNewOccasionDraftAllowedIds(occ.draft_allowed_user_ids || []);
     setShowOccasionModal(true);
   };
 
@@ -559,6 +578,31 @@ function App() {
     setLoading(false);
   };
 
+  const handleApproveOccasion = async (occId: string, isDetailsModal: boolean) => {
+    setLoading(true);
+    const { error } = await supabase
+      .from('gp_occasions')
+      .update({ is_draft: false })
+      .eq('id', occId);
+
+    if (error) {
+      setToast({ message: 'Nie udało się zatwierdzić: ' + error.message, type: 'error' });
+    } else {
+      fetchOccasions();
+      setToast({ message: 'Wydarzenie zostało zatwierdzone!', type: 'success' });
+      if (isDetailsModal) {
+        if (activeOccasionDetails && activeOccasionDetails.id === occId) {
+          setActiveOccasionDetails({ ...activeOccasionDetails, is_draft: false });
+        }
+      } else {
+        if (activeOccasion && activeOccasion.id === occId) {
+          setActiveOccasion({ ...activeOccasion, is_draft: false });
+        }
+      }
+    }
+    setLoading(false);
+  };
+
   // Add / Edit Occasion logic
   const handleSaveOccasion = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -580,7 +624,9 @@ function App() {
           location: newOccasionLocation || null,
           google_maps_url: newOccasionGoogleMapsUrl || null,
           description: newOccasionDesc,
-          invited_user_ids: newOccasionInvitedIds
+          invited_user_ids: newOccasionInvitedIds,
+          is_draft: newOccasionIsDraft,
+          draft_allowed_user_ids: newOccasionDraftAllowedIds
         })
         .eq('id', editingOccasion.id);
 
@@ -602,7 +648,9 @@ function App() {
             location: newOccasionLocation || undefined,
             google_maps_url: newOccasionGoogleMapsUrl || undefined,
             description: newOccasionDesc || undefined,
-            invited_user_ids: newOccasionInvitedIds
+            invited_user_ids: newOccasionInvitedIds,
+            is_draft: newOccasionIsDraft,
+            draft_allowed_user_ids: newOccasionDraftAllowedIds
           });
         }
         setToast({ message: 'Okazja została zaktualizowana!', type: 'success' });
@@ -621,7 +669,9 @@ function App() {
           google_maps_url: newOccasionGoogleMapsUrl || null,
           description: newOccasionDesc,
           is_archived: false,
-          invited_user_ids: newOccasionInvitedIds
+          invited_user_ids: newOccasionInvitedIds,
+          is_draft: newOccasionIsDraft,
+          draft_allowed_user_ids: newOccasionDraftAllowedIds
         });
 
       if (error) {
@@ -1127,6 +1177,18 @@ function App() {
 
 
 
+  // 0. App Initializing splash screen
+  if (initializing) {
+    return (
+      <div className="auth-container">
+        <div style={{ textAlign: 'center', padding: '2rem' }}>
+          <div className="empty-state-icon" style={{ animation: 'fadeIn 1s infinite alternate', fontSize: '3rem' }}>🎁</div>
+          <h3 style={{ marginTop: '1rem', color: 'var(--text-secondary)' }}>Ładowanie aplikacji...</h3>
+        </div>
+      </div>
+    );
+  }
+
   // 1. PIN Unlock screen
   if (!unlocked) {
     return (
@@ -1210,55 +1272,61 @@ function App() {
             <>
               {authLoading && <div style={{ textAlign: 'center', margin: '1rem 0' }}>Logowanie...</div>}
               
-              <div className="profile-grid">
-                {Object.values(profiles).map(profile => (
-                  <button 
-                    key={profile.id}
-                    className="btn btn-secondary" 
-                    style={{ 
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      padding: '1.25rem 0.5rem',
-                      height: '110px',
-                      position: 'relative',
-                      width: '100%'
-                    }}
-                    onClick={() => handleSelectProfile(profile)}
-                    disabled={authLoading}
-                  >
-                    <span style={{ fontSize: '1.8rem', marginBottom: '0.35rem' }}>👤</span>
-                    <span style={{ 
-                      fontSize: '0.85rem', 
-                      fontWeight: '500', 
-                      textAlign: 'center', 
-                      wordBreak: 'break-word',
-                      display: '-webkit-box',
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: 'vertical',
-                      overflow: 'hidden',
-                      lineHeight: '1.2'
-                    }}>
-                      {profile.display_name}
-                    </span>
-                    {profile.is_admin && (
+              {Object.values(profiles).length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
+                  Ładowanie listy profili...
+                </div>
+              ) : (
+                <div className="profile-grid">
+                  {Object.values(profiles).map(profile => (
+                    <button 
+                      key={profile.id}
+                      className="btn btn-secondary" 
+                      style={{ 
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '1.25rem 0.5rem',
+                        height: '110px',
+                        position: 'relative',
+                        width: '100%'
+                      }}
+                      onClick={() => handleSelectProfile(profile)}
+                      disabled={authLoading}
+                    >
+                      <span style={{ fontSize: '1.8rem', marginBottom: '0.35rem' }}>👤</span>
                       <span style={{ 
-                        position: 'absolute', 
-                        top: '5px', 
-                        right: '5px', 
-                        fontSize: '0.6rem', 
-                        opacity: 0.8, 
-                        background: 'var(--primary)', 
-                        padding: '0.1rem 0.3rem', 
-                        borderRadius: '4px' 
+                        fontSize: '0.85rem', 
+                        fontWeight: '500', 
+                        textAlign: 'center', 
+                        wordBreak: 'break-word',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                        lineHeight: '1.2'
                       }}>
-                        Admin
+                        {profile.display_name}
                       </span>
-                    )}
-                  </button>
-                ))}
-              </div>
+                      {profile.is_admin && (
+                        <span style={{ 
+                          position: 'absolute', 
+                          top: '5px', 
+                          right: '5px', 
+                          fontSize: '0.6rem', 
+                          opacity: 0.8, 
+                          background: 'var(--primary)', 
+                          padding: '0.1rem 0.3rem', 
+                          borderRadius: '4px' 
+                        }}>
+                          Admin
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               <div className="auth-switch">
                 <button className="btn-link" onClick={() => {
@@ -1318,7 +1386,15 @@ function App() {
   };
 
   const isUserInvited = (occ: Occasion) => {
+    // Creator can always see their own occasions
     if (occ.creator_id === user.id) return true;
+
+    // If it's a draft, only the creator and draft_allowed_user_ids can see it
+    if (occ.is_draft) {
+      return occ.draft_allowed_user_ids?.includes(user.id) || false;
+    }
+
+    // Otherwise, normal invited guests logic:
     if (occ.owner_id === user.id) return true;
     if (!occ.invited_user_ids) return true; // old events are public by default
     return occ.invited_user_ids.includes(user.id);
@@ -1455,6 +1531,19 @@ function App() {
                               Zarchiwizowane
                             </span>
                           )}
+                          {occ.is_draft && (
+                            <span 
+                              className="badge badge-warning" 
+                              style={{ 
+                                marginLeft: '0.5rem', 
+                                background: 'rgba(245, 158, 11, 0.15)', 
+                                color: '#fba524', 
+                                border: '1px solid rgba(245, 158, 11, 0.2)' 
+                              }}
+                            >
+                              Robocze
+                            </span>
+                          )}
                         </td>
                         <td data-label="Szczegóły" style={{ textAlign: 'right' }}>
                           <button 
@@ -1482,9 +1571,9 @@ function App() {
                   <div key={occ.id} className="glass-panel occasion-card" onClick={() => selectOccasion(occ)}>
                     <div 
                       className="occasion-badge" 
-                      style={occ.is_archived ? { background: 'rgba(255, 255, 255, 0.1)', color: 'var(--text-secondary)' } : undefined}
+                      style={occ.is_archived ? { background: 'rgba(255, 255, 255, 0.1)', color: 'var(--text-secondary)' } : (occ.is_draft ? { background: 'rgba(245, 158, 11, 0.15)', color: '#fba524' } : undefined)}
                     >
-                      {occ.is_archived ? '🗄️ Zarchiwizowane' : daysLeft}
+                      {occ.is_archived ? '🗄️ Zarchiwizowane' : (occ.is_draft ? '🛠️ Robocze' : daysLeft)}
                     </div>
                     <h3>{occ.title}</h3>
                     <div className="occasion-meta">
@@ -1549,6 +1638,12 @@ function App() {
           <button className="back-link" onClick={() => { setView('dashboard'); setActiveOccasion(null); }}>
             ← Powrót do pulpitu
           </button>
+
+           {activeOccasion.is_draft && (
+            <div className="alert alert-warning" style={{ marginBottom: '1.5rem', background: 'rgba(245, 158, 11, 0.15)', color: '#fba524', borderColor: 'rgba(245, 158, 11, 0.2)' }}>
+              🛠️ To wydarzenie jest w wersji roboczej (widoczne tylko dla organizatorów).
+            </div>
+          )}
 
           {activeOccasion.is_archived && (
             <div className="alert alert-danger" style={{ marginBottom: '1.5rem' }}>
@@ -1628,6 +1723,15 @@ function App() {
                 </div>
                 {activeOccasion.creator_id === user.id && (
                   <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    {activeOccasion.is_draft && (
+                      <button 
+                        className="btn btn-secondary" 
+                        style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem', border: '1px solid var(--accent-green)', color: 'var(--accent-green)' }} 
+                        onClick={() => handleApproveOccasion(activeOccasion.id, false)}
+                      >
+                        ✅ Zatwierdź
+                      </button>
+                    )}
                     <button className="btn btn-secondary" style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem' }} onClick={() => startEditOccasion(activeOccasion)}>
                       ✏️ Edytuj
                     </button>
@@ -1822,6 +1926,76 @@ function App() {
                   placeholder="https://maps.google.com/..." 
                 />
               </div>
+
+              <div className="form-group">
+                <label>Status wydarzenia *</label>
+                <div style={{ display: 'flex', gap: '1rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0, textTransform: 'none', cursor: 'pointer', color: 'white' }}>
+                    <input 
+                      type="radio" 
+                      name="is_draft" 
+                      checked={newOccasionIsDraft} 
+                      onChange={() => setNewOccasionIsDraft(true)}
+                      style={{ width: '18px', height: '18px' }}
+                    />
+                    🛠️ Wersja robocza (ukryta przed gośćmi)
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0, textTransform: 'none', cursor: 'pointer', color: 'white' }}>
+                    <input 
+                      type="radio" 
+                      name="is_draft" 
+                      checked={!newOccasionIsDraft} 
+                      onChange={() => setNewOccasionIsDraft(false)}
+                      style={{ width: '18px', height: '18px' }}
+                    />
+                    ✅ Zatwierdzone (widoczne dla gości)
+                  </label>
+                </div>
+              </div>
+
+              {newOccasionIsDraft && (
+                <div className="form-group" style={{ marginTop: '0.75rem' }}>
+                  <label>Kto ma współtworzyć / widzieć tę wersję roboczą?</label>
+                  <div style={{ 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    gap: '0.5rem', 
+                    background: 'rgba(0, 0, 0, 0.2)', 
+                    padding: '0.75rem', 
+                    borderRadius: '10px', 
+                    border: '1px solid var(--card-border)',
+                    maxHeight: '120px',
+                    overflowY: 'auto'
+                  }}>
+                    {Object.values(profiles).filter(p => p.id !== user.id).map(p => {
+                      const isChecked = newOccasionDraftAllowedIds.includes(p.id);
+                      return (
+                        <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <input 
+                            type="checkbox" 
+                            id={`draft-invite-${p.id}`}
+                            checked={isChecked}
+                            onChange={e => {
+                              if (e.target.checked) {
+                                setNewOccasionDraftAllowedIds([...newOccasionDraftAllowedIds, p.id]);
+                              } else {
+                                setNewOccasionDraftAllowedIds(newOccasionDraftAllowedIds.filter(id => id !== p.id));
+                              }
+                            }}
+                            style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                          />
+                          <label 
+                            htmlFor={`draft-invite-${p.id}`} 
+                            style={{ margin: 0, textTransform: 'none', fontSize: '0.9rem', color: 'white', cursor: 'pointer' }}
+                          >
+                            {p.display_name}
+                          </label>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div className="form-group">
                 <label>Zaproszeni członkowie (kto ma widzieć wydarzenie) *</label>
@@ -2210,6 +2384,11 @@ function App() {
               <button className="close-btn" onClick={() => setActiveOccasionDetails(null)}>×</button>
             </div>
             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', textAlign: 'left' }}>
+              {activeOccasionDetails.is_draft && (
+                <div className="alert alert-warning" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fba524', borderColor: 'rgba(245, 158, 11, 0.2)', padding: '0.5rem 0.75rem', borderRadius: '8px', fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+                  🛠️ Wersja robocza (widoczna tylko dla organizatorów).
+                </div>
+              )}
               <div>
                 <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Nazwa okazji:</strong>
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, color: 'white', marginTop: '0.15rem' }}>{activeOccasionDetails.title}</div>
@@ -2271,8 +2450,18 @@ function App() {
               >
                 Wejdź do środka
               </button>
-              {activeOccasionDetails.creator_id === user?.id && (
+               {activeOccasionDetails.creator_id === user?.id && (
                 <>
+                  {activeOccasionDetails.is_draft && (
+                    <button 
+                      type="button" 
+                      className="btn btn-secondary" 
+                      style={{ border: '1px solid var(--accent-green)', color: 'var(--accent-green)' }}
+                      onClick={() => handleApproveOccasion(activeOccasionDetails.id, true)}
+                    >
+                      ✅ Zatwierdź
+                    </button>
+                  )}
                   <button 
                     type="button" 
                     className="btn btn-secondary" 
