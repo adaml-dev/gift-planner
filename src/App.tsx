@@ -222,7 +222,10 @@ function App() {
     if (data) {
       const pMap: Record<string, Profile> = {};
       data.forEach(p => {
-        pMap[p.id] = p;
+        // Exclude user 'lisiecki.adam' who is used in other apps and should not be displayed in gift-planner
+        if (p.display_name !== 'lisiecki.adam' && p.id !== 'a8bdf339-a3ae-4066-9e25-33e9c4fae007') {
+          pMap[p.id] = p;
+        }
       });
       setProfiles(pMap);
     }
