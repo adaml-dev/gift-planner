@@ -710,9 +710,14 @@ function App() {
   const isOwnerActiveOccasion = activeOccasion?.owner_id === user?.id;
   
   // Solenizant tab includes:
-  // - Gifts where is_secret = false and suggested_by = owner
-  // - OR gifts suggested by creator/guests but not marked as secret
-  const solenizantGifts = gifts.filter(g => !g.is_secret);
+  // - If current user is the owner, only gifts suggested/added by the owner.
+  // - Otherwise, all gifts that are not marked as secret (is_secret = false).
+  const solenizantGifts = gifts.filter(g => {
+    if (isOwnerActiveOccasion) {
+      return g.suggested_by === user?.id;
+    }
+    return !g.is_secret;
+  });
 
   // Guest tab (Pomysły gości) includes:
   // - Gifts marked as secret (is_secret = true)
