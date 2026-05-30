@@ -395,6 +395,51 @@ function App() {
     setLoading(false);
   };
 
+  const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+
+  const handleRenameSave = async (profileId: string) => {
+    if (!editingName.trim()) return;
+    
+    setLoading(true);
+    const { error } = await supabase
+      .from('gp_profiles')
+      .update({ display_name: editingName.trim() })
+      .eq('id', profileId);
+
+    if (error) {
+      setToast({ message: 'Błąd podczas zmiany nazwy: ' + error.message, type: 'error' });
+    } else {
+      setToast({ message: 'Nazwa została pomyślnie zmieniona.', type: 'success' });
+      setEditingProfileId(null);
+      fetchProfiles();
+    }
+    setLoading(false);
+  };
+
+  const handleConfirmDeleteMember = (profileId: string, name: string) => {
+    setConfirmModal({
+      show: true,
+      title: 'Usuń członka rodziny',
+      message: `Czy na pewno chcesz usunąć użytkownika ${name}? Spowoduje to trwałe usunięcie jego konta oraz wszystkich jego rezerwacji prezentów.`,
+      onConfirm: async () => {
+        setLoading(true);
+        const { error } = await supabase
+          .from('gp_profiles')
+          .delete()
+          .eq('id', profileId);
+
+        if (error) {
+          setToast({ message: 'Błąd podczas usuwania użytkownika: ' + error.message, type: 'error' });
+        } else {
+          setToast({ message: 'Użytkownik został usunięty.', type: 'success' });
+          fetchProfiles();
+        }
+        setLoading(false);
+      }
+    });
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
   };
@@ -456,6 +501,13 @@ function App() {
         setLoading(false);
       }
     });
+  };
+
+  const openGiftModal = () => {
+    // If they are on the Guests tab and are not the owner, default to secret. Otherwise false.
+    const defaultSecret = (!isOwnerActiveOccasion && activeTab === 'goscie');
+    setNewGiftIsSecret(defaultSecret);
+    setShowGiftModal(true);
   };
 
   // Add Gift logic
@@ -1063,7 +1115,7 @@ function App() {
                 )}
               </div>
               <div style={{ display: 'flex', gap: '0.75rem' }}>
-                <button className="btn btn-primary" onClick={() => setShowGiftModal(true)}>
+                <button className="btn btn-primary" onClick={openGiftModal}>
                   🎁 Dodaj Prezent
                 </button>
               </div>
@@ -1102,7 +1154,7 @@ function App() {
                       <div className="empty-state-icon">🎁</div>
                       <h4>Brak prezentów na liście</h4>
                       <p style={{ marginBottom: '1.5rem' }}>Dodaj prezenty, które chcesz podarować lub otrzymać!</p>
-                      <button className="btn btn-primary" onClick={() => setShowGiftModal(true)}>
+                      <button className="btn btn-primary" onClick={openGiftModal}>
                         Dodaj prezent
                       </button>
                     </div>
@@ -1126,7 +1178,7 @@ function App() {
                       <div className="empty-state-icon">🤫</div>
                       <h4>Brak pomysłów gości</h4>
                       <p style={{ marginBottom: '1.5rem' }}>Zaproponuj coś fajnego, o czym solenizant nie wie!</p>
-                      <button className="btn btn-primary" onClick={() => setShowGiftModal(true)}>
+                      <button className="btn btn-primary" onClick={openGiftModal}>
                         Dodaj pomysł-niespodziankę
                       </button>
                     </div>
@@ -1353,29 +1405,38 @@ function App() {
         </div>
       )}
 
-      {/* ----------------- ADD MEMBER MODAL (ADMIN ONLY) ----------------- */}
+      {/* ----------------- ADD / MANAGE MEMBER MODAL (ADMIN ONLY) ----------------- */}
       {showAddMemberModal && (
         <div className="modal-overlay">
-          <div className="glass-panel modal-content">
+          <div className="glass-panel modal-content" style={{ maxWidth: '600px' }}>
             <div className="modal-header">
-              <h2>Dodaj nowego członka rodziny</h2>
-              <button className="close-btn" onClick={() => setShowAddMemberModal(false)}>×</button>
+              <h2>Zarządzanie członkami rodziny</h2>
+              <button className="close-btn" onClick={() => { setShowAddMemberModal(false); setEditingProfileId(null); }}>×</button>
             </div>
 
-            <form onSubmit={handleAddMember}>
-              <div className="form-group">
-                <label>Imię i Nazwisko / Nick *</label>
-                <input 
-                  type="text" 
-                  className="form-control" 
-                  value={newMemberName} 
-                  onChange={e => setNewMemberName(e.target.value)} 
-                  placeholder="np. Ciocia Halina, Wujek Stefan" 
-                  required 
-                />
+            {/* A. Form to Add Member */}
+            <form onSubmit={handleAddMember} style={{ borderBottom: '1px solid var(--border)', paddingBottom: '1.5rem', marginBottom: '1.5rem' }}>
+              <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem' }}>Dodaj nowego członka</h3>
+              <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <div className="form-group" style={{ flex: 2, margin: 0 }}>
+                  <label>Imię i Nazwisko / Nick *</label>
+                  <input 
+                    type="text" 
+                    className="form-control" 
+                    value={newMemberName} 
+                    onChange={e => setNewMemberName(e.target.value)} 
+                    placeholder="np. Ciocia Halina" 
+                    required 
+                  />
+                </div>
+                <div style={{ flex: 1, display: 'flex', gap: '1rem' }}>
+                  <button type="submit" className="btn btn-primary" style={{ width: '100%', height: '42px', padding: '0 1rem' }} disabled={loading}>
+                    Dodaj
+                  </button>
+                </div>
               </div>
-
-              <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '1.5rem 0' }}>
+              
+              <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '1rem', marginBottom: 0 }}>
                 <input 
                   type="checkbox" 
                   id="new_member_is_admin" 
@@ -1389,31 +1450,100 @@ function App() {
               </div>
 
               {newMemberIsAdmin && (
-                <div className="form-group">
+                <div className="form-group" style={{ marginTop: '1rem', marginBottom: 0 }}>
                   <label>Hasło administratora *</label>
                   <input 
                     type="password" 
                     className="form-control" 
                     value={newMemberPassword} 
                     onChange={e => setNewMemberPassword(e.target.value)} 
-                    placeholder="Wpisz hasło dla admina" 
+                    placeholder="Hasło dla nowego admina" 
                     required 
                   />
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                    Hasło będzie wymagane, gdy ta osoba wybierze swoje imię na ekranie startowym.
-                  </p>
                 </div>
               )}
-
-              <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
-                <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowAddMemberModal(false)}>
-                  Anuluj
-                </button>
-                <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={loading}>
-                  Zapisz
-                </button>
-              </div>
             </form>
+
+            {/* B. List of Existing Members to Edit/Delete */}
+            <div>
+              <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem' }}>Lista członków</h3>
+              <div style={{ maxHeight: '250px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem', paddingRight: '5px' }}>
+                {Object.values(profiles).map(profile => {
+                  const isCurrent = profile.id === user?.id;
+                  const isEditing = editingProfileId === profile.id;
+                  
+                  return (
+                    <div key={profile.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255, 255, 255, 0.03)', padding: '0.75rem 1rem', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1 }}>
+                        <span style={{ fontSize: '1.2rem' }}>👤</span>
+                        {isEditing ? (
+                          <input 
+                            type="text" 
+                            className="form-control" 
+                            style={{ padding: '0.4rem 0.8rem', fontSize: '0.9rem', maxWidth: '200px' }}
+                            value={editingName}
+                            onChange={e => setEditingName(e.target.value)}
+                            autoFocus
+                          />
+                        ) : (
+                          <span style={{ fontSize: '0.95rem', fontWeight: 500 }}>
+                            {profile.display_name} {isCurrent && <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>(Ty)</span>}
+                          </span>
+                        )}
+                        {profile.is_admin && <span style={{ fontSize: '0.7rem', background: 'var(--primary)', padding: '0.15rem 0.4rem', borderRadius: '4px' }}>Admin</span>}
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        {isEditing ? (
+                          <>
+                            <button 
+                              className="btn btn-primary" 
+                              style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
+                              onClick={() => handleRenameSave(profile.id)}
+                              disabled={loading}
+                            >
+                              Zapisz
+                            </button>
+                            <button 
+                              className="btn btn-secondary" 
+                              style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
+                              onClick={() => setEditingProfileId(null)}
+                              disabled={loading}
+                            >
+                              Anuluj
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            {!isCurrent && (
+                              <button 
+                                className="btn btn-secondary" 
+                                style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
+                                onClick={() => {
+                                  setEditingProfileId(profile.id);
+                                  setEditingName(profile.display_name);
+                                }}
+                              >
+                                Edytuj
+                              </button>
+                            )}
+                            {!isCurrent && (
+                              <button 
+                                className="btn btn-danger btn-secondary" 
+                                style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
+                                onClick={() => handleConfirmDeleteMember(profile.id, profile.display_name)}
+                              >
+                                Usuń
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
       )}
