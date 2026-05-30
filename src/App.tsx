@@ -63,6 +63,7 @@ interface Vote {
 }
 
 function App() {
+  const [friendlyMode, setFriendlyMode] = useState(() => localStorage.getItem('gp_friendly_mode') === 'true');
   const [user, setUser] = useState<any>(null);
   const [unlocked, setUnlocked] = useState(() => localStorage.getItem('gp_unlocked') === 'true');
   const [pin, setPin] = useState('');
@@ -121,6 +122,17 @@ function App() {
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberIsAdmin, setNewMemberIsAdmin] = useState(false);
   const [newMemberPassword, setNewMemberPassword] = useState('');
+
+  // Effect to sync friendly mode with document html class
+  useEffect(() => {
+    if (friendlyMode) {
+      document.documentElement.classList.add('friendly-mode');
+      localStorage.setItem('gp_friendly_mode', 'true');
+    } else {
+      document.documentElement.classList.remove('friendly-mode');
+      localStorage.setItem('gp_friendly_mode', 'false');
+    }
+  }, [friendlyMode]);
 
   // 1. Monitor Auth status
   useEffect(() => {
@@ -859,11 +871,33 @@ function App() {
     );
   };
 
+  const renderFriendlyModeToggle = (compact = false) => (
+    <button 
+      className="btn btn-secondary friendly-toggle-btn" 
+      style={{ 
+        padding: compact ? '0.4rem 0.75rem' : '0.5rem 1rem', 
+        fontSize: compact ? '0.75rem' : '0.85rem', 
+        fontWeight: 'bold',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '0.35rem',
+        border: '1px solid var(--primary)',
+        borderRadius: '8px'
+      }}
+      onClick={() => setFriendlyMode(prev => !prev)}
+    >
+      👓 {compact ? (friendlyMode ? 'Zwykły tekst' : 'Duży tekst') : (friendlyMode ? 'Tryb Standardowy (Ciemny)' : 'Tryb Czytelny (Duży tekst / Jasny)')}
+    </button>
+  );
+
   // 1. PIN Unlock screen
   if (!unlocked) {
     return (
       <div className="auth-container">
         <div className="glass-panel auth-card">
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+            {renderFriendlyModeToggle(true)}
+          </div>
           <div className="auth-header">
             <img src={giftBanner} alt="Gift Planner Logo" width="300" height="200" style={{ objectFit: 'cover' }} />
             <h1>Gift Planner</h1>
@@ -904,6 +938,9 @@ function App() {
     return (
       <div className="auth-container">
         <div className="glass-panel auth-card" style={{ maxWidth: selectedProfile ? '500px' : '650px', transition: 'max-width 0.3s ease' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+            {renderFriendlyModeToggle(true)}
+          </div>
           <div className="auth-header">
             <img src={giftBanner} alt="Gift Planner Logo" width="300" height="200" style={{ objectFit: 'cover' }} />
             <h1>Kim jesteś?</h1>
@@ -1020,9 +1057,10 @@ function App() {
             🎁 Gift Planner
           </div>
           <div className="navbar-user">
+            {renderFriendlyModeToggle(true)}
             {isAdmin && (
               <button className="btn btn-primary" style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }} onClick={() => setShowAddMemberModal(true)}>
-                👤 Dodaj członka
+                👤 Zarządzaj rodziną
               </button>
             )}
             <span style={{ fontSize: '0.95rem', color: 'var(--text-secondary)' }}>
