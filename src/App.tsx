@@ -2,6 +2,17 @@ import { useState, useEffect } from 'react';
 import { supabase, authAdminClient } from './supabase';
 import giftBanner from './assets/gift_banner.png';
 
+const generateUUID = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
 interface Profile {
   id: string;
   display_name: string;
@@ -41,6 +52,7 @@ interface Booking {
   user_id: string;
   created_at: string;
   is_group?: boolean;
+  group_id?: string | null;
 }
 
 interface Vote {
@@ -492,10 +504,15 @@ function App() {
   };
 
   // Booking logic
-  const handleBook = async (giftId: string, isGroup: boolean = false) => {
+  const handleBook = async (giftId: string, isGroup: boolean = false, groupId: string | null = null) => {
     const { error } = await supabase
       .from('gp_bookings')
-      .insert({ gift_id: giftId, user_id: user.id, is_group: isGroup });
+      .insert({ 
+        gift_id: giftId, 
+        user_id: user.id, 
+        is_group: isGroup,
+        group_id: groupId 
+      });
 
     if (error) {
       setToast({ message: 'Błąd rezerwacji: ' + error.message, type: 'error' });
@@ -592,9 +609,23 @@ function App() {
   // Helper to render a gift card (used in both tabs to prevent duplication and syntax bugs)
   const renderGiftCard = (gift: Gift, isGuestTab: boolean) => {
     const giftBookings = bookings.filter(b => b.gift_id === gift.id);
-    const isBooked = giftBookings.length > 0;
-    const isGroup = isBooked && giftBookings[0].is_group;
-    const isBookedByMe = giftBookings.some(b => b.user_id === user?.id);
+    
+    // Filter individual bookings
+    const individualBookings = giftBookings.filter(b => !b.is_group);
+    
+    // Group bookings by group_id
+    const groupBookingsMap: Record<string, Booking[]> = {};
+    giftBookings.forEach(b => {
+      if (b.is_group && b.group_id) {
+        if (!groupBookingsMap[b.group_id]) {
+          groupBookingsMap[b.group_id] = [];
+        }
+        groupBookingsMap[b.group_id].push(b);
+      }
+    });
+
+    const myBooking = giftBookings.find(b => b.user_id === user?.id);
+    const hasMyBooking = !!myBooking;
     const isGiftCreator = gift.suggested_by === user?.id;
 
     const votesCount = getVoteCount(gift.id);
@@ -644,55 +675,70 @@ function App() {
 
         {/* Bookings section (hidden from occasion owner) */}
         {!isOwnerActiveOccasion && (
-          <div style={{ marginTop: 'auto', paddingTop: '1rem' }}>
-            {isBooked ? (
-              isGroup ? (
-                <>
-                  <div className="gift-status-badge booked" style={{ background: 'rgba(170, 59, 255, 0.1)', color: 'var(--primary)' }}>
-                    👥 Składka: {giftBookings.map(b => profiles[b.user_id]?.display_name || 'Znajomy').join(', ')}
+          <div style={{ marginTop: 'auto', paddingTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            
+            {/* 1. Existing Individual Bookings */}
+            {individualBookings.map(b => {
+              const isMe = b.user_id === user?.id;
+              return (
+                <div key={b.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', background: 'rgba(255, 255, 255, 0.03)', padding: '0.75rem', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <div className="gift-status-badge booked" style={{ margin: 0, justifyContent: 'flex-start' }}>
+                    🔒 Kupuje sam: <strong>{isMe ? 'Ty' : (profiles[b.user_id]?.display_name || 'znajomy')}</strong>
                   </div>
-                  <div className="gift-actions">
-                    {isBookedByMe ? (
-                      <button className="btn btn-secondary" onClick={() => handleUnbook(gift.id)}>
+                  {isMe && (
+                    <button className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', width: '100%' }} onClick={() => handleUnbook(gift.id)}>
+                      Anuluj zakup
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* 2. Existing Group Bookings */}
+            {Object.entries(groupBookingsMap).map(([groupId, groupBookingsList], idx) => {
+              const isMeInGroup = groupBookingsList.some(b => b.user_id === user?.id);
+              const memberNames = groupBookingsList.map(b => profiles[b.user_id]?.display_name || 'Znajomy').join(', ');
+              
+              return (
+                <div key={groupId} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', background: 'rgba(170, 59, 255, 0.05)', padding: '0.75rem', borderRadius: '10px', border: '1px solid rgba(170, 59, 255, 0.15)' }}>
+                  <div className="gift-status-badge booked" style={{ margin: 0, background: 'none', color: 'var(--primary)', justifyContent: 'flex-start' }}>
+                    👥 Składka #{idx + 1}: <strong>{memberNames}</strong>
+                  </div>
+                  <div className="gift-actions" style={{ margin: 0, border: 'none', paddingTop: 0 }}>
+                    {isMeInGroup ? (
+                      <button className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', width: '100%' }} onClick={() => handleUnbook(gift.id)}>
                         Opuść składkę
                       </button>
                     ) : (
-                      <button className="btn btn-primary" onClick={() => handleBook(gift.id, true)}>
-                        Dołącz do składki
+                      <button 
+                        className="btn btn-primary" 
+                        style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', width: '100%' }} 
+                        onClick={() => handleBook(gift.id, true, groupId)}
+                        disabled={hasMyBooking}
+                      >
+                        Dołącz do tej składki
                       </button>
                     )}
                   </div>
-                </>
-              ) : (
-                <>
-                  <div className="gift-status-badge booked">
-                    🔒 Kupuje: {isBookedByMe ? 'Ty' : (profiles[giftBookings[0].user_id]?.display_name || 'znajomego')}
-                  </div>
-                  <div className="gift-actions">
-                    {isBookedByMe ? (
-                      <button className="btn btn-secondary" onClick={() => handleUnbook(gift.id)}>
-                        Anuluj rezerwację
-                      </button>
-                    ) : (
-                      <button className="btn btn-secondary" disabled style={{ opacity: 0.5 }}>
-                        Zajęty
-                      </button>
-                    )}
-                  </div>
-                </>
-              )
-            ) : (
-              <>
-                <div className="gift-status-badge available">🟢 Dostępny</div>
-                <div className="gift-actions" style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button className="btn btn-primary" style={{ padding: '0.5rem 0.75rem', fontSize: '0.85rem', flex: 1 }} onClick={() => handleBook(gift.id, false)}>
+                </div>
+              );
+            })}
+
+            {/* 3. Actions for Users who haven't booked this gift yet */}
+            {!hasMyBooking && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textAlign: 'center', marginBottom: '0.25rem' }}>
+                  Chcesz podarować ten prezent?
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button className="btn btn-primary" style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', flex: 1 }} onClick={() => handleBook(gift.id, false, null)}>
                     Kupuję sam
                   </button>
-                  <button className="btn btn-secondary" style={{ padding: '0.5rem 0.75rem', fontSize: '0.85rem', flex: 1 }} onClick={() => handleBook(gift.id, true)}>
-                    Składka grupowa
+                  <button className="btn btn-secondary" style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', flex: 1 }} onClick={() => handleBook(gift.id, true, generateUUID())}>
+                    Nowa składka
                   </button>
                 </div>
-              </>
+              </div>
             )}
           </div>
         )}
@@ -762,7 +808,7 @@ function App() {
   if (!user) {
     return (
       <div className="auth-container">
-        <div className="glass-panel auth-card" style={{ maxWidth: '500px' }}>
+        <div className="glass-panel auth-card" style={{ maxWidth: selectedProfile ? '500px' : '650px', transition: 'max-width 0.3s ease' }}>
           <div className="auth-header">
             <img src={giftBanner} alt="Gift Planner Logo" width="300" height="200" style={{ objectFit: 'cover' }} />
             <h1>Kim jesteś?</h1>
@@ -801,17 +847,60 @@ function App() {
             <>
               {authLoading && <div style={{ textAlign: 'center', margin: '1rem 0' }}>Logowanie...</div>}
               
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '300px', overflowY: 'auto', paddingRight: '5px', margin: '1.5rem 0' }}>
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: 'repeat(3, 1fr)', 
+                gap: '0.75rem', 
+                maxHeight: '350px', 
+                overflowY: 'auto', 
+                paddingRight: '5px', 
+                margin: '1.5rem 0' 
+              }}>
                 {Object.values(profiles).map(profile => (
                   <button 
                     key={profile.id}
                     className="btn btn-secondary" 
-                    style={{ justifyContent: 'space-between', padding: '1rem', width: '100%' }}
+                    style={{ 
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '1.25rem 0.5rem',
+                      height: '110px',
+                      position: 'relative',
+                      width: '100%'
+                    }}
                     onClick={() => handleSelectProfile(profile)}
                     disabled={authLoading}
                   >
-                    <span>👤 {profile.display_name}</span>
-                    {profile.is_admin && <span style={{ fontSize: '0.75rem', opacity: 0.7, background: 'var(--primary)', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>Admin</span>}
+                    <span style={{ fontSize: '1.8rem', marginBottom: '0.35rem' }}>👤</span>
+                    <span style={{ 
+                      fontSize: '0.85rem', 
+                      fontWeight: '500', 
+                      textAlign: 'center', 
+                      wordBreak: 'break-word',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                      lineHeight: '1.2'
+                    }}>
+                      {profile.display_name}
+                    </span>
+                    {profile.is_admin && (
+                      <span style={{ 
+                        position: 'absolute', 
+                        top: '5px', 
+                        right: '5px', 
+                        fontSize: '0.6rem', 
+                        opacity: 0.8, 
+                        background: 'var(--primary)', 
+                        padding: '0.1rem 0.3rem', 
+                        borderRadius: '4px' 
+                      }}>
+                        Admin
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
