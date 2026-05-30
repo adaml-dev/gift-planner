@@ -839,8 +839,10 @@ function App() {
 
     if (error) {
       setToast({ message: 'Błąd anulowania rezerwacji: ' + error.message, type: 'error' });
-    } else if (activeOccasion) {
-      fetchBookings(activeOccasion.id);
+    } else {
+      if (activeOccasion) {
+        fetchBookings(activeOccasion.id);
+      }
       setToast({ message: 'Anulowano rezerwację prezentu.', type: 'success' });
     }
   };
@@ -1488,7 +1490,7 @@ function App() {
               return (
                 <div className="glass-panel empty-state">
                   <div className="empty-state-icon">🛍️</div>
-                  <h3>Brak aktywnych rezerwacji</h3>
+                  <h3>Brak aktywnych rezerwacji i zakupów</h3>
                   <p style={{ marginBottom: '1.5rem' }}>
                     Nie masz obecnie żadnych zarezerwowanych prezentów. Przejdź do aktywnego wydarzenia, aby zarezerwować prezent!
                   </p>
@@ -1499,97 +1501,203 @@ function App() {
               );
             }
 
-            return (
-              <div className="table-responsive">
-                <table className="compact-table">
-                  <thead>
-                    <tr>
-                      <th>Prezent</th>
-                      <th>Wydarzenie</th>
-                      <th>Data</th>
-                      <th>Cena</th>
-                      <th>Status</th>
-                      <th style={{ textAlign: 'right' }}>Akcje</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {myBookingsList.map(b => {
-                      const gift = allGifts.find(g => g.id === b.gift_id);
-                      if (!gift) return null;
-                      const occasion = occasions.find(o => o.id === gift.occasion_id);
-                      if (!occasion) return null;
+            const purchasesList = myBookingsList.filter(b => b.is_approved);
+            const reservationsList = myBookingsList.filter(b => !b.is_approved);
 
-                      return (
-                        <tr key={b.id}>
-                          <td data-label="Prezent" style={{ fontWeight: 500 }}>
-                            {gift.name}
-                          </td>
-                          <td data-label="Wydarzenie">
-                            {occasion.title}
-                          </td>
-                          <td data-label="Data" style={{ whiteSpace: 'nowrap' }}>
-                            📅 {formatDate(occasion.date)}
-                          </td>
-                          <td data-label="Cena">
-                            {gift.price ? `${gift.price} zł` : '—'}
-                          </td>
-                          <td data-label="Status">
-                            {b.is_approved ? (
-                              <span 
-                                className="badge badge-success" 
-                                style={{ 
-                                  background: 'rgba(16, 185, 129, 0.15)', 
-                                  color: '#10b981', 
-                                  border: '1px solid rgba(16, 185, 129, 0.2)',
-                                  padding: '0.15rem 0.4rem',
-                                  borderRadius: '4px'
-                                }}
-                              >
-                                ✓ Zatwierdzony zakup
-                              </span>
-                            ) : (
-                              <span 
-                                className="badge badge-warning" 
-                                style={{ 
-                                  background: 'rgba(245, 158, 11, 0.15)', 
-                                  color: '#fba524', 
-                                  border: '1px solid rgba(245, 158, 11, 0.2)',
-                                  padding: '0.15rem 0.4rem',
-                                  borderRadius: '4px'
-                                }}
-                              >
-                                ⏳ Rezerwacja (kolejka)
-                              </span>
-                            )}
-                          </td>
-                          <td data-label="Akcje" style={{ textAlign: 'right' }}>
-                            <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end' }}>
-                              <button 
-                                className="btn btn-primary" 
-                                style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
-                                onClick={() => {
-                                  selectOccasion(occasion);
-                                }}
-                              >
-                                Pokaż okazję
-                              </button>
-                              <button 
-                                className="btn btn-secondary" 
-                                style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
-                                onClick={async () => {
-                                  await handleUnbook(gift.id);
-                                  await fetchMyBookingsData();
-                                }}
-                              >
-                                Anuluj
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
+                {/* 1. CONFIRMED PURCHASES */}
+                <div>
+                  <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    🛍️ Moje Zakupy (Do kupienia) <span className="occasion-badge" style={{ margin: 0, padding: '0.2rem 0.6rem', fontSize: '0.85rem' }}>{purchasesList.length}</span>
+                  </h2>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1rem' }}>
+                    Organizator zatwierdził te rezerwacje i zamienił je w polecenie zakupu. Kup te prezenty!
+                  </p>
+                  
+                  {purchasesList.length === 0 ? (
+                    <div className="glass-panel" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                      <p style={{ margin: 0 }}>Nie masz jeszcze żadnych zatwierdzonych zakupów.</p>
+                    </div>
+                  ) : (
+                    <div className="table-responsive" style={{ marginTop: '0.5rem' }}>
+                      <table className="compact-table">
+                        <thead>
+                          <tr>
+                            <th>Prezent</th>
+                            <th>Wydarzenie</th>
+                            <th>Data</th>
+                            <th>Cena</th>
+                            <th>Status</th>
+                            <th style={{ textAlign: 'right' }}>Akcje</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {purchasesList.map(b => {
+                            const gift = allGifts.find(g => g.id === b.gift_id);
+                            if (!gift) return null;
+                            const occasion = occasions.find(o => o.id === gift.occasion_id);
+                            if (!occasion) return null;
+
+                            return (
+                              <tr key={b.id}>
+                                <td data-label="Prezent" style={{ fontWeight: 500 }}>
+                                  {gift.name}
+                                </td>
+                                <td data-label="Wydarzenie">
+                                  {occasion.title}
+                                </td>
+                                <td data-label="Data" style={{ whiteSpace: 'nowrap' }}>
+                                  📅 {formatDate(occasion.date)}
+                                </td>
+                                <td data-label="Cena">
+                                  {gift.price ? `${gift.price} zł` : '—'}
+                                </td>
+                                <td data-label="Status">
+                                  <span 
+                                    className="badge badge-success" 
+                                    style={{ 
+                                      background: 'rgba(16, 185, 129, 0.15)', 
+                                      color: '#10b981', 
+                                      border: '1px solid rgba(16, 185, 129, 0.2)',
+                                      padding: '0.15rem 0.4rem',
+                                      borderRadius: '4px'
+                                    }}
+                                  >
+                                    ✓ Zatwierdzony zakup
+                                  </span>
+                                </td>
+                                <td data-label="Akcje" style={{ textAlign: 'right' }}>
+                                  <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end' }}>
+                                    <button 
+                                      className="btn btn-primary" 
+                                      style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
+                                      onClick={() => selectOccasion(occasion)}
+                                    >
+                                      Pokaż okazję
+                                    </button>
+                                    <button 
+                                      className="btn btn-secondary" 
+                                      style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
+                                      onClick={async () => {
+                                        if (window.confirm("Czy na pewno chcesz anulować ten zakup? Organizator wydarzenia zatwierdził już tę rezerwację.")) {
+                                          await handleUnbook(gift.id);
+                                          await fetchMyBookingsData();
+                                        }
+                                      }}
+                                    >
+                                      Anuluj
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. PENDING RESERVATIONS */}
+                <div>
+                  <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    ⏳ Moje Rezerwacje (W kolejce) <span className="occasion-badge" style={{ margin: 0, padding: '0.2rem 0.6rem', fontSize: '0.85rem', background: 'rgba(245, 158, 11, 0.15)', color: '#fba524' }}>{reservationsList.length}</span>
+                  </h2>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1rem' }}>
+                    Jesteś w kolejce rezerwujących do tych prezentów. Czekaj na decyzję organizatora, który przydzieli polecenie zakupu.
+                  </p>
+
+                  {reservationsList.length === 0 ? (
+                    <div className="glass-panel" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                      <p style={{ margin: 0 }}>Nie masz obecnie żadnych oczekujących rezerwacji w kolejce.</p>
+                    </div>
+                  ) : (
+                    <div className="table-responsive" style={{ marginTop: '0.5rem' }}>
+                      <table className="compact-table">
+                        <thead>
+                          <tr>
+                            <th>Prezent</th>
+                            <th>Wydarzenie</th>
+                            <th>Pozycja w kolejce</th>
+                            <th>Cena</th>
+                            <th>Status</th>
+                            <th style={{ textAlign: 'right' }}>Akcje</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reservationsList.map(b => {
+                            const gift = allGifts.find(g => g.id === b.gift_id);
+                            if (!gift) return null;
+                            const occasion = occasions.find(o => o.id === gift.occasion_id);
+                            if (!occasion) return null;
+
+                            // Calculate queue position
+                            const giftBookings = bookings
+                              .filter(bk => bk.gift_id === gift.id)
+                              .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+                            const queuePos = giftBookings.findIndex(bk => bk.id === b.id) + 1;
+                            const totalInQueue = giftBookings.length;
+
+                            return (
+                              <tr key={b.id}>
+                                <td data-label="Prezent" style={{ fontWeight: 500 }}>
+                                  {gift.name}
+                                </td>
+                                <td data-label="Wydarzenie">
+                                  {occasion.title}
+                                </td>
+                                <td data-label="Pozycja w kolejce">
+                                  <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                                    #{queuePos}
+                                  </span> z {totalInQueue}
+                                </td>
+                                <td data-label="Cena">
+                                  {gift.price ? `${gift.price} zł` : '—'}
+                                </td>
+                                <td data-label="Status">
+                                  <span 
+                                    className="badge badge-warning" 
+                                    style={{ 
+                                      background: 'rgba(245, 158, 11, 0.15)', 
+                                      color: '#fba524', 
+                                      border: '1px solid rgba(245, 158, 11, 0.2)',
+                                      padding: '0.15rem 0.4rem',
+                                      borderRadius: '4px'
+                                    }}
+                                  >
+                                    ⏳ W kolejce
+                                  </span>
+                                </td>
+                                <td data-label="Akcje" style={{ textAlign: 'right' }}>
+                                  <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end' }}>
+                                    <button 
+                                      className="btn btn-primary" 
+                                      style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
+                                      onClick={() => selectOccasion(occasion)}
+                                    >
+                                      Pokaż okazję
+                                    </button>
+                                    <button 
+                                      className="btn btn-secondary" 
+                                      style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
+                                      onClick={async () => {
+                                        await handleUnbook(gift.id);
+                                        await fetchMyBookingsData();
+                                      }}
+                                    >
+                                      Anuluj rezerwację
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })()}
@@ -1606,47 +1714,50 @@ function App() {
                 Przeglądaj wydarzenia znajomych i rodziny lub stwórz własne.
               </p>
             </div>
-            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-              <div className="view-toggle">
-                <button 
-                  className={`view-toggle-btn ${occasionsView === 'table' ? 'active' : ''}`}
-                  onClick={() => {
-                    setOccasionsView('table');
-                    localStorage.setItem('gp_occasions_view', 'table');
-                  }}
-                >
-                  📊 Lista
-                </button>
-                <button 
-                  className={`view-toggle-btn ${occasionsView === 'grid' ? 'active' : ''}`}
-                  onClick={() => {
-                    setOccasionsView('grid');
-                    localStorage.setItem('gp_occasions_view', 'grid');
-                  }}
-                >
-                  🎴 Kafle
-                </button>
-              </div>
+            <div>
               <button className="btn btn-primary" onClick={openNewOccasionModal}>
                 ➕ Nowe Wydarzenie
               </button>
             </div>
           </div>
 
-          {/* Dashboard Tabs */}
-          <div className="tab-nav" style={{ marginBottom: '1.5rem' }}>
-            <button 
-              className={`tab-btn ${dashboardTab === 'upcoming' ? 'active' : ''}`} 
-              onClick={() => setDashboardTab('upcoming')}
-            >
-              📅 Nadchodzące ({upcomingOccasions.length})
-            </button>
-            <button 
-              className={`tab-btn ${dashboardTab === 'archived' ? 'active' : ''}`} 
-              onClick={() => setDashboardTab('archived')}
-            >
-              🗄️ Archiwum i minione ({archivedOrPastOccasions.length})
-            </button>
+          {/* Dashboard Tabs & View Toggle */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.5rem' }}>
+            <div className="tab-nav" style={{ margin: 0 }}>
+              <button 
+                className={`tab-btn ${dashboardTab === 'upcoming' ? 'active' : ''}`} 
+                onClick={() => setDashboardTab('upcoming')}
+              >
+                📅 Nadchodzące ({upcomingOccasions.length})
+              </button>
+              <button 
+                className={`tab-btn ${dashboardTab === 'archived' ? 'active' : ''}`} 
+                onClick={() => setDashboardTab('archived')}
+              >
+                🗄️ Archiwum i minione ({archivedOrPastOccasions.length})
+              </button>
+            </div>
+
+            <div className="view-toggle" style={{ flexShrink: 0 }}>
+              <button 
+                className={`view-toggle-btn ${occasionsView === 'table' ? 'active' : ''}`}
+                onClick={() => {
+                  setOccasionsView('table');
+                  localStorage.setItem('gp_occasions_view', 'table');
+                }}
+              >
+                📊 Lista
+              </button>
+              <button 
+                className={`view-toggle-btn ${occasionsView === 'grid' ? 'active' : ''}`}
+                onClick={() => {
+                  setOccasionsView('grid');
+                  localStorage.setItem('gp_occasions_view', 'grid');
+                }}
+              >
+                🎴 Kafle
+              </button>
+            </div>
           </div>
 
           {errorMsg && <div className="alert alert-danger">{errorMsg}</div>}
@@ -1877,26 +1988,6 @@ function App() {
                 )}
               </div>
               <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                <div className="view-toggle">
-                  <button 
-                    className={`view-toggle-btn ${giftsView === 'table' ? 'active' : ''}`}
-                    onClick={() => {
-                      setGiftsView('table');
-                      localStorage.setItem('gp_gifts_view', 'table');
-                    }}
-                  >
-                    📊 Lista
-                  </button>
-                  <button 
-                    className={`view-toggle-btn ${giftsView === 'grid' ? 'active' : ''}`}
-                    onClick={() => {
-                      setGiftsView('grid');
-                      localStorage.setItem('gp_gifts_view', 'grid');
-                    }}
-                  >
-                    🎴 Kafle
-                  </button>
-                </div>
                 {activeOccasion.creator_id === user.id && (
                   <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                     {activeOccasion.is_draft && (
@@ -1933,19 +2024,44 @@ function App() {
             </div>
           )}
 
-          {/* Navigation Tabs */}
-          {!isOwnerActiveOccasion && (
-            <div className="tab-nav">
-              <button className={`tab-btn ${activeTab === 'solenizant' ? 'active' : ''}`} onClick={() => setActiveTab('solenizant')}>
-                <span className="hide-mobile">Lista życzeń {activeOccasion.owner_name}</span>
-                <span className="show-mobile-inline">Lista życzeń</span> ({solenizantGifts.length})
+          {/* Navigation Tabs and View Toggle */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.5rem' }}>
+            {!isOwnerActiveOccasion ? (
+              <div className="tab-nav" style={{ margin: 0 }}>
+                <button className={`tab-btn ${activeTab === 'solenizant' ? 'active' : ''}`} onClick={() => setActiveTab('solenizant')}>
+                  <span className="hide-mobile">Lista życzeń {activeOccasion.owner_name}</span>
+                  <span className="show-mobile-inline">Lista życzeń</span> ({solenizantGifts.length})
+                </button>
+                <button className={`tab-btn ${activeTab === 'goscie' ? 'active' : ''}`} onClick={() => setActiveTab('goscie')}>
+                  <span className="hide-mobile">Pomysły i niespodzianki gości</span>
+                  <span className="show-mobile-inline">Niespodzianki</span> ({goscieGifts.length})
+                </button>
+              </div>
+            ) : (
+              <div></div>
+            )}
+
+            <div className="view-toggle" style={{ flexShrink: 0 }}>
+              <button 
+                className={`view-toggle-btn ${giftsView === 'table' ? 'active' : ''}`}
+                onClick={() => {
+                  setGiftsView('table');
+                  localStorage.setItem('gp_gifts_view', 'table');
+                }}
+              >
+                📊 Lista
               </button>
-              <button className={`tab-btn ${activeTab === 'goscie' ? 'active' : ''}`} onClick={() => setActiveTab('goscie')}>
-                <span className="hide-mobile">Pomysły i niespodzianki gości</span>
-                <span className="show-mobile-inline">Niespodzianki</span> ({goscieGifts.length})
+              <button 
+                className={`view-toggle-btn ${giftsView === 'grid' ? 'active' : ''}`}
+                onClick={() => {
+                  setGiftsView('grid');
+                  localStorage.setItem('gp_gifts_view', 'grid');
+                }}
+              >
+                🎴 Kafle
               </button>
             </div>
-          )}
+          </div>
 
           {loading && <div style={{ textAlign: 'center', padding: '2rem' }}>Ładowanie prezentów...</div>}
 
