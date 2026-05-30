@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
-import { supabase } from './supabase';
+import { supabase, authAdminClient } from './supabase';
 import giftBanner from './assets/gift_banner.png';
 
 interface Profile {
   id: string;
   display_name: string;
   avatar_url?: string;
+  is_admin: boolean;
+  email?: string;
+  login_password?: string;
 }
 
 interface Occasion {
@@ -50,7 +53,6 @@ function App() {
   const [unlocked, setUnlocked] = useState(() => localStorage.getItem('gp_unlocked') === 'true');
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState('');
-  const [authName, setAuthName] = useState('');
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
 
@@ -84,6 +86,14 @@ function App() {
   // General loading & message states
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Silent & admin login states
+  const [selectedProfile, setSelectedProfile] = useState<Profile | null>(null);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+  const [newMemberName, setNewMemberName] = useState('');
+  const [newMemberIsAdmin, setNewMemberIsAdmin] = useState(false);
+  const [newMemberPassword, setNewMemberPassword] = useState('');
 
   // 1. Monitor Auth status
   useEffect(() => {
@@ -220,7 +230,6 @@ function App() {
     setLoading(false);
   };
 
-  // Auth logic
   const handlePinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const correctPin = import.meta.env.VITE_APP_PIN || '2026';
@@ -233,36 +242,120 @@ function App() {
     }
   };
 
-  const handleNameSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSelectProfile = async (profile: Profile) => {
     setAuthError('');
-    if (!authName.trim()) {
-      setAuthError('Wpisz swoje imię / nick');
+    if (profile.is_admin) {
+      setSelectedProfile(profile);
       return;
     }
 
     setAuthLoading(true);
-    const randomId = Math.random().toString(36).substring(2, 7) + Date.now().toString().slice(-4);
-    const email = `member_${randomId}@family.local`;
-    const password = `family_secure_pass_2026_${randomId}`;
+    const email = profile.email || `member_${profile.id.substring(0, 8)}@family.local`;
+    const password = profile.login_password || `pass_${profile.id.substring(0, 8)}`;
 
-    const { data, error } = await supabase.auth.signUp({
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    });
+
+    if (error) {
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            display_name: profile.display_name
+          }
+        }
+      });
+
+      if (signUpError) {
+        setAuthError('Błąd połączenia z kontem: ' + signUpError.message);
+      } else if (data.user) {
+        await supabase
+          .from('gp_profiles')
+          .update({ email, login_password: password })
+          .eq('id', profile.id);
+        
+        setUser(data.user);
+        await fetchProfiles();
+      }
+    }
+    setAuthLoading(false);
+  };
+
+  const handleAdminLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProfile || !adminPassword.trim()) return;
+
+    setAuthLoading(true);
+    setAuthError('');
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: selectedProfile.email || '',
+      password: adminPassword
+    });
+
+    if (error) {
+      setAuthError('Niepoprawne hasło administratora: ' + error.message);
+    } else if (data.user) {
+      setUser(data.user);
+      setSelectedProfile(null);
+      setAdminPassword('');
+    }
+    setAuthLoading(false);
+  };
+
+  const handleAddMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMemberName.trim()) return;
+    if (newMemberIsAdmin && !newMemberPassword.trim()) {
+      alert('Administrator musi posiadać hasło!');
+      return;
+    }
+
+    setLoading(true);
+    const randomId = Math.random().toString(36).substring(2, 7) + Date.now().toString().slice(-4);
+    const email = newMemberIsAdmin 
+      ? `${newMemberName.trim().toLowerCase().replace(/\s+/g, '')}@family.local` 
+      : `member_${randomId}@family.local`;
+    const password = newMemberIsAdmin ? newMemberPassword.trim() : `pass_${randomId}`;
+
+    const { data, error } = await authAdminClient.auth.signUp({
       email,
       password,
       options: {
         data: {
-          display_name: authName.trim()
+          display_name: newMemberName.trim()
         }
       }
     });
 
     if (error) {
-      setAuthError('Nie udało się zalogować: ' + error.message);
+      alert('Błąd podczas tworzenia konta: ' + error.message);
     } else if (data.user) {
-      setUser(data.user);
-      await syncProfile(data.user);
+      const { error: profileError } = await supabase
+        .from('gp_profiles')
+        .upsert({
+          id: data.user.id,
+          display_name: newMemberName.trim(),
+          email,
+          login_password: newMemberIsAdmin ? null : password,
+          is_admin: newMemberIsAdmin
+        });
+
+      if (profileError) {
+        alert('Konto utworzone, ale błąd profilu: ' + profileError.message);
+      } else {
+        setShowAddMemberModal(false);
+        setNewMemberName('');
+        setNewMemberIsAdmin(false);
+        setNewMemberPassword('');
+        fetchProfiles();
+        alert(`Dodano użytkownika: ${newMemberName}`);
+      }
     }
-    setAuthLoading(false);
+    setLoading(false);
   };
 
   const handleLogout = async () => {
@@ -511,70 +604,108 @@ function App() {
     );
   }
 
-  // 2. Name entry screen (if unlocked but no user session)
+  // 2. User Selection screen (if unlocked but no user session)
   if (!user) {
     return (
       <div className="auth-container">
-        <div className="glass-panel auth-card">
+        <div className="glass-panel auth-card" style={{ maxWidth: '500px' }}>
           <div className="auth-header">
             <img src={giftBanner} alt="Gift Planner Logo" width="300" height="200" style={{ objectFit: 'cover' }} />
             <h1>Kim jesteś?</h1>
-            <p>Wpisz swoje imię lub pseudonim, aby bliscy wiedzieli, kto rezerwuje i dodaje prezenty.</p>
+            <p>Wybierz swoje imię z listy, aby wejść do aplikacji.</p>
           </div>
 
-          <form onSubmit={handleNameSubmit}>
-            {authError && <div className="alert alert-danger">{authError}</div>}
-            
-            <div className="form-group">
-              <label>Twoje Imię / Nick</label>
-              <input 
-                type="text" 
-                className="form-control" 
-                value={authName} 
-                onChange={e => setAuthName(e.target.value)} 
-                placeholder="np. Wujek Jacek, Mama, Kasia"
-                required 
-                autoFocus
-              />
-            </div>
+          {authError && <div className="alert alert-danger">{authError}</div>}
 
-            <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '1rem' }} disabled={authLoading}>
-              {authLoading ? 'Logowanie...' : 'Wejdź do aplikacji'}
-            </button>
-          </form>
+          {/* If an Admin clicked their name, show password prompt instead */}
+          {selectedProfile ? (
+            <form onSubmit={handleAdminLogin}>
+              <h3 style={{ textAlign: 'center', marginBottom: '1rem' }}>Logowanie administratora: {selectedProfile.display_name}</h3>
+              <div className="form-group">
+                <label>Hasło administratora</label>
+                <input 
+                  type="password" 
+                  className="form-control" 
+                  value={adminPassword} 
+                  onChange={e => setAdminPassword(e.target.value)} 
+                  placeholder="Wpisz swoje hasło"
+                  required 
+                  autoFocus
+                />
+              </div>
 
-          <div className="auth-switch">
-            <button className="btn-link" onClick={() => {
-              setUnlocked(false);
-              localStorage.removeItem('gp_unlocked');
-              setPin('');
-            }}>
-              🔒 Zablokuj aplikację
-            </button>
-          </div>
+              <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+                <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => { setSelectedProfile(null); setAdminPassword(''); setAuthError(''); }} disabled={authLoading}>
+                  Wróć do listy
+                </button>
+                <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={authLoading}>
+                  {authLoading ? 'Logowanie...' : 'Zaloguj'}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <>
+              {authLoading && <div style={{ textAlign: 'center', margin: '1rem 0' }}>Logowanie...</div>}
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '300px', overflowY: 'auto', paddingRight: '5px', margin: '1.5rem 0' }}>
+                {Object.values(profiles).map(profile => (
+                  <button 
+                    key={profile.id}
+                    className="btn btn-secondary" 
+                    style={{ justifyContent: 'space-between', padding: '1rem', width: '100%' }}
+                    onClick={() => handleSelectProfile(profile)}
+                    disabled={authLoading}
+                  >
+                    <span>👤 {profile.display_name}</span>
+                    {profile.is_admin && <span style={{ fontSize: '0.75rem', opacity: 0.7, background: 'var(--primary)', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>Admin</span>}
+                  </button>
+                ))}
+              </div>
+
+              <div className="auth-switch">
+                <button className="btn-link" onClick={() => {
+                  setUnlocked(false);
+                  localStorage.removeItem('gp_unlocked');
+                  setPin('');
+                }}>
+                  🔒 Zablokuj aplikację
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     );
   }
 
   // Header / Navigation
-  const renderNav = () => (
-    <nav className="navbar">
-      <div className="navbar-container">
-        <div className="navbar-brand" onClick={() => { setView('dashboard'); setActiveOccasion(null); }}>
-          🎁 Gift Planner
+  const renderNav = () => {
+    const userProfile = profiles[user.id];
+    const isAdmin = userProfile?.is_admin;
+
+    return (
+      <nav className="navbar">
+        <div className="navbar-container">
+          <div className="navbar-brand" onClick={() => { setView('dashboard'); setActiveOccasion(null); }}>
+            🎁 Gift Planner
+          </div>
+          <div className="navbar-user">
+            {isAdmin && (
+              <button className="btn btn-primary" style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }} onClick={() => setShowAddMemberModal(true)}>
+                👤 Dodaj członka
+              </button>
+            )}
+            <span style={{ fontSize: '0.95rem', color: 'var(--text-secondary)' }}>
+              Cześć, <strong>{userProfile?.display_name || user.email?.split('@')[0]}</strong>!
+            </span>
+            <button className="btn btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }} onClick={handleLogout}>
+              Wyloguj
+            </button>
+          </div>
         </div>
-        <div className="navbar-user">
-          <span style={{ fontSize: '0.95rem', color: 'var(--text-secondary)' }}>
-            Cześć, <strong>{profiles[user.id]?.display_name || user.email?.split('@')[0]}</strong>!
-          </span>
-          <button className="btn btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }} onClick={handleLogout}>
-            Wyloguj
-          </button>
-        </div>
-      </div>
-    </nav>
-  );
+      </nav>
+    );
+  };
 
   return (
     <>
@@ -1056,6 +1187,71 @@ function App() {
                 </button>
                 <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={loading}>
                   Dodaj
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------- ADD MEMBER MODAL (ADMIN ONLY) ----------------- */}
+      {showAddMemberModal && (
+        <div className="modal-overlay">
+          <div className="glass-panel modal-content">
+            <div className="modal-header">
+              <h2>Dodaj nowego członka rodziny</h2>
+              <button className="close-btn" onClick={() => setShowAddMemberModal(false)}>×</button>
+            </div>
+
+            <form onSubmit={handleAddMember}>
+              <div className="form-group">
+                <label>Imię i Nazwisko / Nick *</label>
+                <input 
+                  type="text" 
+                  className="form-control" 
+                  value={newMemberName} 
+                  onChange={e => setNewMemberName(e.target.value)} 
+                  placeholder="np. Ciocia Halina, Wujek Stefan" 
+                  required 
+                />
+              </div>
+
+              <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '1.5rem 0' }}>
+                <input 
+                  type="checkbox" 
+                  id="new_member_is_admin" 
+                  checked={newMemberIsAdmin} 
+                  onChange={e => setNewMemberIsAdmin(e.target.checked)} 
+                  style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                />
+                <label htmlFor="new_member_is_admin" style={{ margin: 0, textTransform: 'none', fontSize: '0.95rem', cursor: 'pointer', color: 'white' }}>
+                  🔑 Nadaj uprawnienia administratora (Admin)
+                </label>
+              </div>
+
+              {newMemberIsAdmin && (
+                <div className="form-group">
+                  <label>Hasło administratora *</label>
+                  <input 
+                    type="password" 
+                    className="form-control" 
+                    value={newMemberPassword} 
+                    onChange={e => setNewMemberPassword(e.target.value)} 
+                    placeholder="Wpisz hasło dla admina" 
+                    required 
+                  />
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                    Hasło będzie wymagane, gdy ta osoba wybierze swoje imię na ekranie startowym.
+                  </p>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
+                <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowAddMemberModal(false)}>
+                  Anuluj
+                </button>
+                <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={loading}>
+                  Zapisz
                 </button>
               </div>
             </form>
