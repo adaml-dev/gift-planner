@@ -63,7 +63,12 @@ interface Vote {
 }
 
 function App() {
-  const [friendlyMode, setFriendlyMode] = useState(() => localStorage.getItem('gp_friendly_mode') === 'true');
+  const [occasionsView, setOccasionsView] = useState<'table' | 'grid'>(
+    () => (localStorage.getItem('gp_occasions_view') as 'table' | 'grid') || 'table'
+  );
+  const [giftsView, setGiftsView] = useState<'table' | 'grid'>(
+    () => (localStorage.getItem('gp_gifts_view') as 'table' | 'grid') || 'table'
+  );
   const [user, setUser] = useState<any>(null);
   const [unlocked, setUnlocked] = useState(() => localStorage.getItem('gp_unlocked') === 'true');
   const [pin, setPin] = useState('');
@@ -123,16 +128,7 @@ function App() {
   const [newMemberIsAdmin, setNewMemberIsAdmin] = useState(false);
   const [newMemberPassword, setNewMemberPassword] = useState('');
 
-  // Effect to sync friendly mode with document html class
-  useEffect(() => {
-    if (friendlyMode) {
-      document.documentElement.classList.add('friendly-mode');
-      localStorage.setItem('gp_friendly_mode', 'true');
-    } else {
-      document.documentElement.classList.remove('friendly-mode');
-      localStorage.setItem('gp_friendly_mode', 'false');
-    }
-  }, [friendlyMode]);
+
 
   // 1. Monitor Auth status
   useEffect(() => {
@@ -716,7 +712,186 @@ function App() {
   
   const sortedGoscieGifts = [...goscieGifts].sort((a, b) => getVoteCount(b.id) - getVoteCount(a.id));
 
-  // Helper to render a gift card (used in both tabs to prevent duplication and syntax bugs)
+  // Render booking cells inside table
+  const renderGiftBookingsCell = (gift: Gift) => {
+    const giftBookings = bookings.filter(b => b.gift_id === gift.id);
+    const individualBookings = giftBookings.filter(b => !b.group_id);
+    const groupBookingsMap: Record<string, Booking[]> = {};
+    giftBookings.forEach(b => {
+      if (b.group_id) {
+        if (!groupBookingsMap[b.group_id]) {
+          groupBookingsMap[b.group_id] = [];
+        }
+        groupBookingsMap[b.group_id].push(b);
+      }
+    });
+
+    const myBooking = giftBookings.find(b => b.user_id === user?.id);
+    const hasMyBooking = !!myBooking;
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: '150px' }}>
+        {/* Individual Bookings */}
+        {individualBookings.map(b => {
+          const isMe = b.user_id === user?.id;
+          return (
+            <div key={b.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', background: 'rgba(255, 255, 255, 0.03)', padding: '0.25rem 0.5rem', borderRadius: '6px', fontSize: '0.8rem' }}>
+              <span>🔒 {isMe ? 'Ty' : (profiles[b.user_id]?.display_name || 'Ktoś')}</span>
+              {isMe && (
+                <button 
+                  className="btn btn-secondary" 
+                  style={{ padding: '0.15rem 0.4rem', fontSize: '0.7rem' }} 
+                  onClick={() => handleUnbook(gift.id)}
+                >
+                  Anuluj
+                </button>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Group Bookings */}
+        {Object.entries(groupBookingsMap).map(([groupId, groupBookingsList], idx) => {
+          const isMeInGroup = groupBookingsList.some(b => b.user_id === user?.id);
+          const memberNames = groupBookingsList.map(b => profiles[b.user_id]?.display_name || 'Znajomy').join(', ');
+          
+          return (
+            <div key={groupId} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', background: 'rgba(170, 59, 255, 0.05)', padding: '0.25rem 0.5rem', borderRadius: '6px', fontSize: '0.8rem', border: '1px solid rgba(170, 59, 255, 0.15)' }}>
+              <span style={{ color: 'var(--primary)', fontWeight: 500 }}>👥 Składka #{idx + 1}: {memberNames}</span>
+              {isMeInGroup ? (
+                <button 
+                  className="btn btn-secondary" 
+                  style={{ padding: '0.15rem 0.4rem', fontSize: '0.7rem', width: '100%' }} 
+                  onClick={() => handleUnbook(gift.id)}
+                >
+                  Opuść
+                </button>
+              ) : (
+                <button 
+                  className="btn btn-primary" 
+                  style={{ padding: '0.15rem 0.4rem', fontSize: '0.7rem', width: '100%' }} 
+                  onClick={() => handleBook(gift.id, true, groupId)}
+                  disabled={hasMyBooking}
+                >
+                  Dołącz
+                </button>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Booking Actions */}
+        {!hasMyBooking && (
+          <div style={{ display: 'flex', gap: '0.25rem' }}>
+            <button 
+              className="btn btn-primary" 
+              style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', flex: 1 }} 
+              onClick={() => handleBook(gift.id, false, null)}
+            >
+              Kupuję sam
+            </button>
+            <button 
+              className="btn btn-secondary" 
+              style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', flex: 1, border: '1px solid var(--primary)' }} 
+              onClick={() => handleBook(gift.id, true, generateUUID())}
+            >
+              +Składka
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Render list of gifts in a compact table view
+  const renderGiftsTable = (giftsList: Gift[], isGuestTab: boolean) => {
+    return (
+      <div className="table-responsive">
+        <table className="compact-table">
+          <thead>
+            <tr>
+              <th>Prezent</th>
+              <th>Cena</th>
+              <th>Linki</th>
+              {!isOwnerActiveOccasion && <th>Zakup</th>}
+              {isGuestTab && <th>Głosy</th>}
+              <th style={{ textAlign: 'right' }}>Akcje</th>
+            </tr>
+          </thead>
+          <tbody>
+            {giftsList.map(gift => {
+              const isGiftCreator = gift.suggested_by === user?.id;
+              const votesCount = getVoteCount(gift.id);
+              const userVoted = hasUserVoted(gift.id);
+
+              return (
+                <tr key={gift.id}>
+                  <td>
+                    <div style={{ fontWeight: 500, fontSize: '0.95rem' }}>{gift.name}</div>
+                    {gift.description && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>{gift.description}</div>}
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                      Zaproponował: {profiles[gift.suggested_by || '']?.display_name || 'Solenizant'}
+                    </div>
+                  </td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    {gift.price ? <strong style={{ color: 'var(--text-primary)' }}>{gift.price} zł</strong> : <span style={{ color: 'var(--text-secondary)' }}>—</span>}
+                  </td>
+                  <td>
+                    <div className="gift-links-list" style={{ margin: 0, gap: '0.25rem' }}>
+                      {gift.urls && gift.urls.length > 0 ? (
+                        gift.urls.map((link, idx) => (
+                          <a key={idx} href={link.url} target="_blank" rel="noopener noreferrer" className="gift-link-tag" style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}>
+                            🔗 {link.label}
+                          </a>
+                        ))
+                      ) : (
+                        gift.url ? (
+                          <a href={gift.url} target="_blank" rel="noopener noreferrer" className="gift-link-tag" style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}>
+                            🔗 Sklep
+                          </a>
+                        ) : (
+                          <span style={{ color: 'var(--text-secondary)' }}>—</span>
+                        )
+                      )}
+                    </div>
+                  </td>
+                  {!isOwnerActiveOccasion && (
+                    <td>
+                      {renderGiftBookingsCell(gift)}
+                    </td>
+                  )}
+                  {isGuestTab && (
+                    <td>
+                      <button 
+                        className={`btn ${userVoted ? 'btn-primary' : 'btn-secondary'}`} 
+                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                        onClick={() => userVoted ? handleUnvote(gift.id) : handleVote(gift.id)}
+                      >
+                        👍 {votesCount}
+                      </button>
+                    </td>
+                  )}
+                  <td style={{ textAlign: 'right' }}>
+                    {(isGiftCreator || activeOccasion?.creator_id === user?.id) && (
+                      <button 
+                        className="btn btn-danger btn-secondary" 
+                        style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }}
+                        onClick={() => handleDeleteGift(gift.id)}
+                      >
+                        Usuń
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  // Render a single gift card (for tiles view)
   const renderGiftCard = (gift: Gift, isGuestTab: boolean) => {
     const giftBookings = bookings.filter(b => b.gift_id === gift.id);
     
@@ -874,33 +1049,13 @@ function App() {
     );
   };
 
-  const renderFriendlyModeToggle = (compact = false) => (
-    <button 
-      className="btn btn-secondary friendly-toggle-btn" 
-      style={{ 
-        padding: compact ? '0.4rem 0.75rem' : '0.5rem 1rem', 
-        fontSize: compact ? '0.75rem' : '0.85rem', 
-        fontWeight: 'bold',
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '0.35rem',
-        border: '1px solid var(--primary)',
-        borderRadius: '8px'
-      }}
-      onClick={() => setFriendlyMode(prev => !prev)}
-    >
-      👓 {compact ? (friendlyMode ? 'Zwykły tekst' : 'Duży tekst') : (friendlyMode ? 'Tryb Standardowy (Ciemny)' : 'Tryb Czytelny (Duży tekst / Jasny)')}
-    </button>
-  );
+
 
   // 1. PIN Unlock screen
   if (!unlocked) {
     return (
       <div className="auth-container">
         <div className="glass-panel auth-card">
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
-            {renderFriendlyModeToggle(true)}
-          </div>
           <div className="auth-header">
             <img src={giftBanner} alt="Gift Planner Logo" width="300" height="200" style={{ objectFit: 'cover' }} />
             <h1>Gift Planner</h1>
@@ -941,9 +1096,6 @@ function App() {
     return (
       <div className="auth-container">
         <div className="glass-panel auth-card" style={{ maxWidth: selectedProfile ? '500px' : '650px', transition: 'max-width 0.3s ease' }}>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
-            {renderFriendlyModeToggle(true)}
-          </div>
           <div className="auth-header">
             <img src={giftBanner} alt="Gift Planner Logo" width="300" height="200" style={{ objectFit: 'cover' }} />
             <h1>Kim jesteś?</h1>
@@ -1060,7 +1212,6 @@ function App() {
             🎁 Gift Planner
           </div>
           <div className="navbar-user">
-            {renderFriendlyModeToggle(true)}
             {isAdmin && (
               <button className="btn btn-primary" style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }} onClick={() => setShowAddMemberModal(true)}>
                 👤 Zarządzaj rodziną
@@ -1092,9 +1243,31 @@ function App() {
                 Przeglądaj wydarzenia znajomych i rodziny lub stwórz własne.
               </p>
             </div>
-            <button className="btn btn-primary" onClick={() => setShowOccasionModal(true)}>
-              ➕ Nowe Wydarzenie
-            </button>
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <div className="view-toggle">
+                <button 
+                  className={`view-toggle-btn ${occasionsView === 'table' ? 'active' : ''}`}
+                  onClick={() => {
+                    setOccasionsView('table');
+                    localStorage.setItem('gp_occasions_view', 'table');
+                  }}
+                >
+                  📊 Lista
+                </button>
+                <button 
+                  className={`view-toggle-btn ${occasionsView === 'grid' ? 'active' : ''}`}
+                  onClick={() => {
+                    setOccasionsView('grid');
+                    localStorage.setItem('gp_occasions_view', 'grid');
+                  }}
+                >
+                  🎴 Kafle
+                </button>
+              </div>
+              <button className="btn btn-primary" onClick={() => setShowOccasionModal(true)}>
+                ➕ Nowe Wydarzenie
+              </button>
+            </div>
           </div>
 
           {errorMsg && <div className="alert alert-danger">{errorMsg}</div>}
@@ -1112,39 +1285,97 @@ function App() {
             </div>
           )}
 
-          <div className="occasions-grid">
-            {occasions.map(occ => {
-              const daysLeft = getDaysLeft(occ.date);
-              const isCreator = occ.creator_id === user.id;
-              const isOwner = occ.owner_id === user.id;
+          {occasionsView === 'table' ? (
+            <div className="table-responsive">
+              <table className="compact-table">
+                <thead>
+                  <tr>
+                    <th>Kiedy</th>
+                    <th>Okazja</th>
+                    <th>Dla kogo</th>
+                    <th>Zostało</th>
+                    <th>Stworzył</th>
+                    <th style={{ textAlign: 'right' }}>Akcje</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {occasions.map(occ => {
+                    const daysLeft = getDaysLeft(occ.date);
+                    const isCreator = occ.creator_id === user.id;
+                    const isOwner = occ.owner_id === user.id;
+                    const badgeClass = daysLeft === 'Dziś!' || daysLeft === 'Jutro!' ? 'badge-success' : daysLeft === 'Już się odbyło' ? 'badge-danger' : 'badge-info';
 
-              return (
-                <div key={occ.id} className="glass-panel occasion-card" onClick={() => selectOccasion(occ)}>
-                  <div className="occasion-badge">{daysLeft}</div>
-                  <h3>{occ.title}</h3>
-                  <div className="occasion-meta">
-                    📅 {formatDate(occ.date)}
-                    <br />
-                    👤 Dla: <strong>{occ.owner_name}</strong> {isOwner && '(To Ty!)'}
-                  </div>
-                  {occ.description && <p className="occasion-desc">{occ.description}</p>}
-                  <div className="occasion-actions">
-                    <div className="creator-info">
-                      <div className="avatar">
-                        {(profiles[occ.creator_id]?.display_name || '?')[0].toUpperCase()}
-                      </div>
-                      Stworzył: {profiles[occ.creator_id]?.display_name || 'Ktoś'}
+                    return (
+                      <tr key={occ.id} className="clickable" onClick={(e) => {
+                        if ((e.target as HTMLElement).closest('.btn-action-no-nav')) return;
+                        selectOccasion(occ);
+                      }}>
+                        <td style={{ whiteSpace: 'nowrap' }}>📅 {formatDate(occ.date)}</td>
+                        <td style={{ fontWeight: 500 }}>{occ.title}</td>
+                        <td>
+                          <strong>{occ.owner_name}</strong> {isOwner && <span style={{ color: 'var(--primary)', fontSize: '0.8rem' }}>(Ty)</span>}
+                        </td>
+                        <td>
+                          <span className={`badge ${badgeClass}`}>
+                            {daysLeft}
+                          </span>
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          {profiles[occ.creator_id]?.display_name || 'Ktoś'}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <div style={{ display: 'inline-flex', gap: '0.5rem', justifyContent: 'flex-end' }} className="btn-action-no-nav">
+                            <button className="btn btn-secondary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }} onClick={() => selectOccasion(occ)}>
+                              Otwórz
+                            </button>
+                            {isCreator && (
+                              <button className="btn btn-danger btn-secondary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }} onClick={(e) => handleDeleteOccasion(occ.id, e)}>
+                                Usuń
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="occasions-grid">
+              {occasions.map(occ => {
+                const daysLeft = getDaysLeft(occ.date);
+                const isCreator = occ.creator_id === user.id;
+                const isOwner = occ.owner_id === user.id;
+
+                return (
+                  <div key={occ.id} className="glass-panel occasion-card" onClick={() => selectOccasion(occ)}>
+                    <div className="occasion-badge">{daysLeft}</div>
+                    <h3>{occ.title}</h3>
+                    <div className="occasion-meta">
+                      📅 {formatDate(occ.date)}
+                      <br />
+                      👤 Dla: <strong>{occ.owner_name}</strong> {isOwner && '(To Ty!)'}
                     </div>
-                    {isCreator && (
-                      <button className="btn btn-danger btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={(e) => handleDeleteOccasion(occ.id, e)}>
-                        Usuń
-                      </button>
-                    )}
+                    {occ.description && <p className="occasion-desc">{occ.description}</p>}
+                    <div className="occasion-actions">
+                      <div className="creator-info">
+                        <div className="avatar">
+                          {(profiles[occ.creator_id]?.display_name || '?')[0].toUpperCase()}
+                        </div>
+                        Stworzył: {profiles[occ.creator_id]?.display_name || 'Ktoś'}
+                      </div>
+                      {isCreator && (
+                        <button className="btn btn-danger btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={(e) => handleDeleteOccasion(occ.id, e)}>
+                          Usuń
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </main>
       )}
 
@@ -1169,7 +1400,27 @@ function App() {
                   </p>
                 )}
               </div>
-              <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <div className="view-toggle">
+                  <button 
+                    className={`view-toggle-btn ${giftsView === 'table' ? 'active' : ''}`}
+                    onClick={() => {
+                      setGiftsView('table');
+                      localStorage.setItem('gp_gifts_view', 'table');
+                    }}
+                  >
+                    📊 Lista
+                  </button>
+                  <button 
+                    className={`view-toggle-btn ${giftsView === 'grid' ? 'active' : ''}`}
+                    onClick={() => {
+                      setGiftsView('grid');
+                      localStorage.setItem('gp_gifts_view', 'grid');
+                    }}
+                  >
+                    🎴 Kafle
+                  </button>
+                </div>
                 <button className="btn btn-primary" onClick={openGiftModal}>
                   🎁 Dodaj Prezent
                 </button>
@@ -1214,9 +1465,13 @@ function App() {
                       </button>
                     </div>
                   ) : (
-                    <div className="gifts-grid">
-                      {solenizantGifts.map(gift => renderGiftCard(gift, false))}
-                    </div>
+                    giftsView === 'table' ? (
+                      renderGiftsTable(solenizantGifts, false)
+                    ) : (
+                      <div className="gifts-grid">
+                        {solenizantGifts.map(gift => renderGiftCard(gift, false))}
+                      </div>
+                    )
                   )}
                 </div>
               )}
@@ -1238,9 +1493,13 @@ function App() {
                       </button>
                     </div>
                   ) : (
-                    <div className="gifts-grid">
-                      {sortedGoscieGifts.map(gift => renderGiftCard(gift, true))}
-                    </div>
+                    giftsView === 'table' ? (
+                      renderGiftsTable(sortedGoscieGifts, true)
+                    ) : (
+                      <div className="gifts-grid">
+                        {sortedGoscieGifts.map(gift => renderGiftCard(gift, true))}
+                      </div>
+                    )
                   )}
                 </div>
               )}
