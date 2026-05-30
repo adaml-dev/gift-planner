@@ -942,15 +942,7 @@ function App() {
             <>
               {authLoading && <div style={{ textAlign: 'center', margin: '1rem 0' }}>Logowanie...</div>}
               
-              <div style={{ 
-                display: 'grid', 
-                gridTemplateColumns: 'repeat(3, 1fr)', 
-                gap: '0.75rem', 
-                maxHeight: '350px', 
-                overflowY: 'auto', 
-                paddingRight: '5px', 
-                margin: '1.5rem 0' 
-              }}>
+              <div className="profile-grid">
                 {Object.values(profiles).map(profile => (
                   <button 
                     key={profile.id}

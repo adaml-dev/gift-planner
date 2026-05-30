@@ -579,17 +579,111 @@ h1 {
   border-color: rgba(16, 185, 129, 0.2);
 }
 
+/* Profile Grid */
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  max-height: 350px;
+  overflow-y: auto;
+  padding-right: 5px;
+  margin: 1.5rem 0;
+}
+
 /* Responsive fixes */
 @media (max-width: 768px) {
+  .container {
+    padding: 1rem 0.75rem;
+  }
+
+  .navbar {
+    padding: 0.75rem 1rem;
+  }
+
+  .navbar-user {
+    gap: 0.75rem;
+  }
+
+  .navbar-user span {
+    display: none; /* Hide welcome text to save space on mobile */
+  }
+
+  .glass-panel {
+    padding: 1.25rem;
+    border-radius: 16px;
+  }
+
   .occasions-grid {
     grid-template-columns: 1fr;
+    gap: 1rem;
   }
+
   .form-row {
     grid-template-columns: 1fr;
+    gap: 0.75rem;
   }
+
   .occasion-title-row {
     flex-direction: column;
     align-items: stretch;
+    gap: 1rem;
+  }
+
+  .occasion-details-header {
+    margin-bottom: 1.5rem;
+  }
+
+  .occasion-details-header h1 {
+    font-size: 1.8rem;
+  }
+
+  .tab-nav {
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .tab-btn {
+    font-size: 0.9rem;
+    padding: 0.5rem 0.25rem;
+    flex: 1;
+    text-align: center;
+  }
+
+  .gifts-grid {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 1rem;
+  }
+
+  .modal-overlay {
+    padding: 0.5rem;
+  }
+
+  .modal-content {
+    padding: 1.25rem;
+    border-radius: 16px;
+  }
+
+  .toast-container {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+  }
+
+  .toast {
+    min-width: 100%;
+    box-sizing: border-box;
+    padding: 0.75rem 1rem;
+  }
+
+  .profile-grid {
+    grid-template-columns: repeat(2, 1fr); /* 2 columns on small screens */
+    max-height: 280px;
+  }
+}
+
+@media (max-width: 480px) {
+  .profile-grid {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
