@@ -117,10 +117,13 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // 2. Fetch occasions & profiles when user is loaded
+  // 2. Fetch profiles immediately on mount, and occasions when user is logged in
+  useEffect(() => {
+    fetchProfiles();
+  }, []);
+
   useEffect(() => {
     if (user) {
-      fetchProfiles();
       fetchOccasions();
     }
   }, [user]);
