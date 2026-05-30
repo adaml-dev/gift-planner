@@ -425,9 +425,7 @@ function App() {
       onConfirm: async () => {
         setLoading(true);
         const { error } = await supabase
-          .from('gp_profiles')
-          .delete()
-          .eq('id', profileId);
+          .rpc('delete_user_by_admin', { user_id: profileId });
 
         if (error) {
           setToast({ message: 'Błąd podczas usuwania użytkownika: ' + error.message, type: 'error' });
