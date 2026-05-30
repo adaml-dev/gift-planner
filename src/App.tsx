@@ -29,6 +29,9 @@ interface Occasion {
   creator_id: string;
   title: string;
   date: string;
+  time?: string;
+  location?: string;
+  google_maps_url?: string;
   description?: string;
   created_at: string;
 }
@@ -94,6 +97,9 @@ function App() {
   const [newOccasionOwnerName, setNewOccasionOwnerName] = useState('');
   const [newOccasionOwnerId, setNewOccasionOwnerId] = useState('');
   const [newOccasionDate, setNewOccasionDate] = useState('');
+  const [newOccasionTime, setNewOccasionTime] = useState('');
+  const [newOccasionLocation, setNewOccasionLocation] = useState('');
+  const [newOccasionGoogleMapsUrl, setNewOccasionGoogleMapsUrl] = useState('');
   const [newOccasionDesc, setNewOccasionDesc] = useState('');
 
   const [showGiftModal, setShowGiftModal] = useState(false);
@@ -495,6 +501,9 @@ function App() {
         owner_id: newOccasionOwnerId || null,
         creator_id: user.id,
         date: newOccasionDate,
+        time: newOccasionTime || null,
+        location: newOccasionLocation || null,
+        google_maps_url: newOccasionGoogleMapsUrl || null,
         description: newOccasionDesc
       });
 
@@ -506,6 +515,9 @@ function App() {
       setNewOccasionOwnerName('');
       setNewOccasionOwnerId('');
       setNewOccasionDate('');
+      setNewOccasionTime('');
+      setNewOccasionLocation('');
+      setNewOccasionGoogleMapsUrl('');
       setNewOccasionDesc('');
       fetchOccasions();
       setToast({ message: 'Okazja została zaplanowana!', type: 'success' });
@@ -1301,7 +1313,9 @@ function App() {
                         if ((e.target as HTMLElement).closest('.btn-action-no-nav')) return;
                         selectOccasion(occ);
                       }}>
-                        <td data-label="Kiedy" style={{ whiteSpace: 'nowrap' }}>📅 {formatDate(occ.date)}</td>
+                        <td data-label="Kiedy" style={{ whiteSpace: 'nowrap' }}>
+                          📅 {formatDate(occ.date)} {occ.time && `o ${occ.time}`}
+                        </td>
                         <td data-label="Okazja" style={{ fontWeight: 500 }}>{occ.title}</td>
                         <td data-label="Dla kogo">
                           <strong>{occ.owner_name}</strong> {isOwner && <span style={{ color: 'var(--primary)', fontSize: '0.8rem' }}>(Ty)</span>}
@@ -1344,9 +1358,15 @@ function App() {
                     <div className="occasion-badge">{daysLeft}</div>
                     <h3>{occ.title}</h3>
                     <div className="occasion-meta">
-                      📅 {formatDate(occ.date)}
+                      📅 {formatDate(occ.date)} {occ.time && `o ${occ.time}`}
                       <br />
                       👤 Dla: <strong>{occ.owner_name}</strong> {isOwner && '(To Ty!)'}
+                      {occ.location && (
+                        <>
+                          <br />
+                          📍 {occ.location}
+                        </>
+                      )}
                     </div>
                     {occ.description && <p className="occasion-desc">{occ.description}</p>}
                     <div className="occasion-actions">
@@ -1380,11 +1400,33 @@ function App() {
           <div className="glass-panel occasion-details-header">
             <div className="occasion-title-row">
               <div>
-                <div className="occasion-date">📅 {formatDate(activeOccasion.date)} ({getDaysLeft(activeOccasion.date)})</div>
+                <div className="occasion-date">
+                  📅 {formatDate(activeOccasion.date)} 
+                  {activeOccasion.time && ` o ${activeOccasion.time}`} 
+                  {` (${getDaysLeft(activeOccasion.date)})`}
+                </div>
                 <h1 style={{ margin: '0 0 0.5rem 0' }}>{activeOccasion.title}</h1>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '1.05rem' }}>
-                  Okazja dla: <strong>{activeOccasion.owner_name}</strong> {isOwnerActiveOccasion && '(Ciebie)'}
-                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginBottom: '0.75rem' }}>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: '1.05rem' }}>
+                    Okazja dla: <strong>{activeOccasion.owner_name}</strong> {isOwnerActiveOccasion && '(Ciebie)'}
+                  </span>
+                  {(activeOccasion.location || activeOccasion.google_maps_url) && (
+                    <span style={{ fontSize: '0.95rem', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                      📍 Lokalizacja: {activeOccasion.location || 'Brak nazwy'}
+                      {activeOccasion.google_maps_url && (
+                        <a 
+                          href={activeOccasion.google_maps_url} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="gift-link-tag" 
+                          style={{ marginLeft: '0.5rem', padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                        >
+                          🗺️ Zobacz w Google Maps
+                        </a>
+                      )}
+                    </span>
+                  )}
+                </div>
                 {activeOccasion.description && (
                   <p style={{ marginTop: '1rem', fontStyle: 'italic', color: 'var(--text-secondary)' }}>
                     "{activeOccasion.description}"
@@ -1550,25 +1592,58 @@ function App() {
                 </p>
               </div>
 
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Data wydarzenia *</label>
+                  <input 
+                    type="date" 
+                    className="form-control" 
+                    value={newOccasionDate} 
+                    onChange={e => setNewOccasionDate(e.target.value)} 
+                    required 
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Godzina (opcjonalnie)</label>
+                  <input 
+                    type="time" 
+                    className="form-control" 
+                    value={newOccasionTime} 
+                    onChange={e => setNewOccasionTime(e.target.value)} 
+                  />
+                </div>
+              </div>
+
               <div className="form-group">
-                <label>Data wydarzenia *</label>
+                <label>Lokalizacja (opcjonalnie)</label>
                 <input 
-                  type="date" 
+                  type="text" 
                   className="form-control" 
-                  value={newOccasionDate} 
-                  onChange={e => setNewOccasionDate(e.target.value)} 
-                  required 
+                  value={newOccasionLocation} 
+                  onChange={e => setNewOccasionLocation(e.target.value)} 
+                  placeholder="np. Restauracja Pod Gruszą" 
                 />
               </div>
 
               <div className="form-group">
-                <label>Krótki opis / Uwagi (np. miejsce imprezy, rozmiar ubrań)</label>
+                <label>Link do pinezki Google Maps (opcjonalnie)</label>
+                <input 
+                  type="url" 
+                  className="form-control" 
+                  value={newOccasionGoogleMapsUrl} 
+                  onChange={e => setNewOccasionGoogleMapsUrl(e.target.value)} 
+                  placeholder="https://maps.google.com/..." 
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Krótki opis / Uwagi (np. rozmiar ubrań, preferencje)</label>
                 <textarea 
                   className="form-control" 
                   rows={3}
                   value={newOccasionDesc} 
                   onChange={e => setNewOccasionDesc(e.target.value)} 
-                  placeholder="np. Impreza w sobotę w ogrodzie. Rozmiar koszulki M, lubi książki kryminalne..."
+                  placeholder="np. Rozmiar koszulki M, lubi książki kryminalne..."
                 />
               </div>
 
