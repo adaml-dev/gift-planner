@@ -29,6 +29,7 @@ interface Gift {
   description?: string;
   price?: number;
   url?: string;
+  urls?: { label: string; url: string }[];
   suggested_by?: string;
   is_secret: boolean;
   created_at: string;
@@ -80,12 +81,13 @@ function App() {
   const [newGiftName, setNewGiftName] = useState('');
   const [newGiftDesc, setNewGiftDesc] = useState('');
   const [newGiftPrice, setNewGiftPrice] = useState('');
-  const [newGiftUrl, setNewGiftUrl] = useState('');
+  const [giftVariants, setGiftVariants] = useState<{ label: string; url: string }[]>([{ label: '', url: '' }]);
   const [newGiftIsSecret, setNewGiftIsSecret] = useState(false);
 
   // General loading & message states
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // Silent & admin login states
   const [selectedProfile, setSelectedProfile] = useState<Profile | null>(null);
@@ -121,6 +123,13 @@ function App() {
   useEffect(() => {
     fetchProfiles();
   }, []);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   useEffect(() => {
     if (user) {
@@ -313,7 +322,7 @@ function App() {
     e.preventDefault();
     if (!newMemberName.trim()) return;
     if (newMemberIsAdmin && !newMemberPassword.trim()) {
-      alert('Administrator musi posiadać hasło!');
+      setToast({ message: 'Administrator musi posiadać hasło!', type: 'error' });
       return;
     }
 
@@ -336,7 +345,7 @@ function App() {
     });
 
     if (error) {
-      alert('Błąd podczas tworzenia konta: ' + error.message);
+      setToast({ message: 'Błąd podczas tworzenia konta: ' + error.message, type: 'error' });
     } else if (data.user) {
       const { error: profileError } = await supabase
         .from('gp_profiles')
@@ -349,14 +358,14 @@ function App() {
         });
 
       if (profileError) {
-        alert('Konto utworzone, ale błąd profilu: ' + profileError.message);
+        setToast({ message: 'Konto utworzone, ale błąd profilu: ' + profileError.message, type: 'error' });
       } else {
         setShowAddMemberModal(false);
         setNewMemberName('');
         setNewMemberIsAdmin(false);
         setNewMemberPassword('');
         fetchProfiles();
-        alert(`Dodano użytkownika: ${newMemberName}`);
+        setToast({ message: `Dodano użytkownika: ${newMemberName}`, type: 'success' });
       }
     }
     setLoading(false);
@@ -370,7 +379,7 @@ function App() {
   const handleCreateOccasion = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newOccasionTitle.trim() || !newOccasionOwnerName.trim() || !newOccasionDate) {
-      alert('Wypełnij wymagane pola!');
+      setToast({ message: 'Wypełnij wymagane pola!', type: 'error' });
       return;
     }
 
@@ -387,16 +396,16 @@ function App() {
       });
 
     if (error) {
-      alert('Nie udało się utworzyć okazji: ' + error.message);
+      setToast({ message: 'Nie udało się utworzyć okazji: ' + error.message, type: 'error' });
     } else {
       setShowOccasionModal(false);
-      // Reset form
       setNewOccasionTitle('');
       setNewOccasionOwnerName('');
       setNewOccasionOwnerId('');
       setNewOccasionDate('');
       setNewOccasionDesc('');
       fetchOccasions();
+      setToast({ message: 'Okazja została zaplanowana!', type: 'success' });
     }
     setLoading(false);
   };
@@ -412,9 +421,10 @@ function App() {
       .eq('id', id);
 
     if (error) {
-      alert('Błąd podczas usuwania: ' + error.message);
+      setToast({ message: 'Błąd podczas usuwania: ' + error.message, type: 'error' });
     } else {
       fetchOccasions();
+      setToast({ message: 'Okazja została usunięta.', type: 'success' });
     }
     setLoading(false);
   };
@@ -425,8 +435,14 @@ function App() {
     if (!newGiftName.trim() || !activeOccasion) return;
 
     setLoading(true);
-    // Solenizant cannot suggest secrets.
     const isSecretValue = activeOccasion.owner_id === user.id ? false : newGiftIsSecret;
+
+    const filteredVariants = giftVariants
+      .filter(v => v.url.trim() !== '')
+      .map(v => ({
+        label: v.label.trim() || 'Sklep',
+        url: v.url.trim()
+      }));
 
     const { error } = await supabase
       .from('gp_gifts')
@@ -435,21 +451,23 @@ function App() {
         name: newGiftName,
         description: newGiftDesc || null,
         price: newGiftPrice ? parseFloat(newGiftPrice) : null,
-        url: newGiftUrl || null,
+        url: filteredVariants[0]?.url || null,
+        urls: filteredVariants,
         suggested_by: user.id,
         is_secret: isSecretValue
       });
 
     if (error) {
-      alert('Nie udało się dodać prezentu: ' + error.message);
+      setToast({ message: 'Nie udało się dodać prezentu: ' + error.message, type: 'error' });
     } else {
       setShowGiftModal(false);
       setNewGiftName('');
       setNewGiftDesc('');
       setNewGiftPrice('');
-      setNewGiftUrl('');
+      setGiftVariants([{ label: '', url: '' }]);
       setNewGiftIsSecret(false);
       fetchGifts(activeOccasion.id);
+      setToast({ message: 'Prezent został dodany do listy.', type: 'success' });
     }
     setLoading(false);
   };
@@ -464,9 +482,10 @@ function App() {
       .eq('id', giftId);
 
     if (error) {
-      alert('Błąd podczas usuwania: ' + error.message);
+      setToast({ message: 'Błąd podczas usuwania: ' + error.message, type: 'error' });
     } else if (activeOccasion) {
       fetchGifts(activeOccasion.id);
+      setToast({ message: 'Prezent został usunięty.', type: 'success' });
     }
     setLoading(false);
   };
@@ -478,9 +497,10 @@ function App() {
       .insert({ gift_id: giftId, user_id: user.id });
 
     if (error) {
-      alert('Błąd rezerwacji: ' + error.message);
+      setToast({ message: 'Błąd rezerwacji: ' + error.message, type: 'error' });
     } else if (activeOccasion) {
       fetchBookings(activeOccasion.id);
+      setToast({ message: 'Zarezerwowano prezent!', type: 'success' });
     }
   };
 
@@ -492,9 +512,10 @@ function App() {
       .eq('user_id', user.id);
 
     if (error) {
-      alert('Błąd anulowania rezerwacji: ' + error.message);
+      setToast({ message: 'Błąd anulowania rezerwacji: ' + error.message, type: 'error' });
     } else if (activeOccasion) {
       fetchBookings(activeOccasion.id);
+      setToast({ message: 'Anulowano rezerwację prezentu.', type: 'success' });
     }
   };
 
@@ -505,9 +526,10 @@ function App() {
       .insert({ gift_id: giftId, user_id: user.id });
 
     if (error) {
-      alert('Błąd głosowania: ' + error.message);
+      setToast({ message: 'Błąd głosowania: ' + error.message, type: 'error' });
     } else if (activeOccasion) {
       fetchVotes(activeOccasion.id);
+      setToast({ message: 'Oddano głos na pomysł!', type: 'success' });
     }
   };
 
@@ -519,9 +541,10 @@ function App() {
       .eq('user_id', user.id);
 
     if (error) {
-      alert('Błąd anulowania głosu: ' + error.message);
+      setToast({ message: 'Błąd anulowania głosu: ' + error.message, type: 'error' });
     } else if (activeOccasion) {
       fetchVotes(activeOccasion.id);
+      setToast({ message: 'Anulowano głos.', type: 'success' });
     }
   };
 
@@ -862,10 +885,20 @@ function App() {
                             {gift.price && <div className="gift-price">{gift.price} zł</div>}
                             
                             <div className="gift-meta">
-                              {gift.url && (
-                                <a href={gift.url} target="_blank" rel="noopener noreferrer" className="btn-link" style={{ alignSelf: 'flex-start' }}>
-                                  🔗 Zobacz w sklepie
-                                </a>
+                              {gift.urls && gift.urls.length > 0 ? (
+                                <div className="gift-links-list">
+                                  {gift.urls.map((link, idx) => (
+                                    <a key={idx} href={link.url} target="_blank" rel="noopener noreferrer" className="gift-link-tag">
+                                      🔗 {link.label}
+                                    </a>
+                                  ))}
+                                </div>
+                              ) : (
+                                gift.url && (
+                                  <a href={gift.url} target="_blank" rel="noopener noreferrer" className="btn-link" style={{ alignSelf: 'flex-start', marginBottom: '0.5rem' }}>
+                                    🔗 Zobacz w sklepie
+                                  </a>
+                                )
                               )}
                               <span>Zaproponowany przez: {profiles[gift.suggested_by || '']?.display_name || 'Solenizant'}</span>
                             </div>
@@ -967,10 +1000,20 @@ function App() {
                             {gift.price && <div className="gift-price">{gift.price} zł</div>}
 
                             <div className="gift-meta">
-                              {gift.url && (
-                                <a href={gift.url} target="_blank" rel="noopener noreferrer" className="btn-link" style={{ alignSelf: 'flex-start' }}>
-                                  🔗 Zobacz w sklepie
-                                </a>
+                              {gift.urls && gift.urls.length > 0 ? (
+                                <div className="gift-links-list">
+                                  {gift.urls.map((link, idx) => (
+                                    <a key={idx} href={link.url} target="_blank" rel="noopener noreferrer" className="gift-link-tag">
+                                      🔗 {link.label}
+                                    </a>
+                                  ))}
+                                </div>
+                              ) : (
+                                gift.url && (
+                                  <a href={gift.url} target="_blank" rel="noopener noreferrer" className="btn-link" style={{ alignSelf: 'flex-start', marginBottom: '0.5rem' }}>
+                                    🔗 Zobacz w sklepie
+                                  </a>
+                                )
                               )}
                               <span>Zaproponowane przez: {profiles[gift.suggested_by || '']?.display_name || 'Znajomy'}</span>
                             </div>
@@ -1134,28 +1177,67 @@ function App() {
                 />
               </div>
 
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Szacowana cena (zł)</label>
-                  <input 
-                    type="number" 
-                    className="form-control" 
-                    value={newGiftPrice} 
-                    onChange={e => setNewGiftPrice(e.target.value)} 
-                    placeholder="np. 1200" 
-                  />
-                </div>
+              <div className="form-group">
+                <label>Szacowana cena (zł)</label>
+                <input 
+                  type="number" 
+                  className="form-control" 
+                  value={newGiftPrice} 
+                  onChange={e => setNewGiftPrice(e.target.value)} 
+                  placeholder="np. 1200" 
+                />
+              </div>
 
-                <div className="form-group">
-                  <label>Link do sklepu</label>
-                  <input 
-                    type="url" 
-                    className="form-control" 
-                    value={newGiftUrl} 
-                    onChange={e => setNewGiftUrl(e.target.value)} 
-                    placeholder="https://..." 
-                  />
-                </div>
+              <div className="form-group">
+                <label>Linki do sklepów / warianty (opcjonalnie)</label>
+                {giftVariants.map((variant, index) => (
+                  <div key={index} style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      style={{ flex: 1 }}
+                      placeholder="Nazwa sklepu (np. Allegro)" 
+                      value={variant.label}
+                      onChange={e => {
+                        const newV = [...giftVariants];
+                        newV[index].label = e.target.value;
+                        setGiftVariants(newV);
+                      }}
+                    />
+                    <input 
+                      type="url" 
+                      className="form-control" 
+                      style={{ flex: 2 }}
+                      placeholder="https://..." 
+                      value={variant.url}
+                      onChange={e => {
+                        const newV = [...giftVariants];
+                        newV[index].url = e.target.value;
+                        setGiftVariants(newV);
+                      }}
+                    />
+                    {giftVariants.length > 1 && (
+                      <button 
+                        type="button" 
+                        className="btn btn-danger" 
+                        style={{ padding: '0.5rem 0.75rem', display: 'flex', alignItems: 'center' }}
+                        onClick={() => {
+                          setGiftVariants(giftVariants.filter((_, i) => i !== index));
+                        }}
+                      >
+                        🗑️
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  style={{ fontSize: '0.85rem', padding: '0.4rem 0.8rem', marginTop: '0.25rem' }}
+                  onClick={() => setGiftVariants([...giftVariants, { label: '', url: '' }])}
+                >
+                  ➕ Dodaj kolejny link
+                </button>
               </div>
 
               <div className="form-group">
@@ -1259,6 +1341,13 @@ function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {toast && (
+        <div className="toast-container">
+          <div className={`toast toast-${toast.type}`}>
+            {toast.type === 'success' ? '✅' : '❌'} {toast.message}
           </div>
         </div>
       )}
