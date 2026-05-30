@@ -46,12 +46,11 @@ interface Vote {
 }
 
 function App() {
-  // Auth state
   const [user, setUser] = useState<any>(null);
-  const [authEmail, setAuthEmail] = useState('');
-  const [authPassword, setAuthPassword] = useState('');
+  const [unlocked, setUnlocked] = useState(() => localStorage.getItem('gp_unlocked') === 'true');
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState('');
   const [authName, setAuthName] = useState('');
-  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
 
@@ -222,43 +221,46 @@ function App() {
   };
 
   // Auth logic
-  const handleAuth = async (e: React.FormEvent) => {
+  const handlePinSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const correctPin = import.meta.env.VITE_APP_PIN || '2026';
+    if (pin === correctPin) {
+      setUnlocked(true);
+      localStorage.setItem('gp_unlocked', 'true');
+      setPinError('');
+    } else {
+      setPinError('Niepoprawny kod PIN. Spróbuj ponownie.');
+    }
+  };
+
+  const handleNameSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
-    setAuthLoading(true);
+    if (!authName.trim()) {
+      setAuthError('Wpisz swoje imię / nick');
+      return;
+    }
 
-    if (authMode === 'signup') {
-      if (!authName.trim()) {
-        setAuthError('Podaj swoje imię i nazwisko / nick');
-        setAuthLoading(false);
-        return;
-      }
-      const { data, error } = await supabase.auth.signUp({
-        email: authEmail,
-        password: authPassword,
-        options: {
-          data: {
-            display_name: authName
-          }
+    setAuthLoading(true);
+    const randomId = Math.random().toString(36).substring(2, 7) + Date.now().toString().slice(-4);
+    const email = `member_${randomId}@family.local`;
+    const password = `family_secure_pass_2026_${randomId}`;
+
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          display_name: authName.trim()
         }
-      });
-      if (error) {
-        setAuthError(error.message);
-      } else if (data.user) {
-        // Success
-        setUser(data.user);
-        await syncProfile(data.user);
       }
-    } else {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: authEmail,
-        password: authPassword
-      });
-      if (error) {
-        setAuthError(error.message);
-      } else if (data.user) {
-        setUser(data.user);
-      }
+    });
+
+    if (error) {
+      setAuthError('Nie udało się zalogować: ' + error.message);
+    } else if (data.user) {
+      setUser(data.user);
+      await syncProfile(data.user);
     }
     setAuthLoading(false);
   };
@@ -469,79 +471,86 @@ function App() {
   // Check booking helper
   const getBooking = (giftId: string) => bookings.find(b => b.gift_id === giftId);
 
-  // If user is not logged in, render Auth screen
-  if (!user) {
+  // 1. PIN Unlock screen
+  if (!unlocked) {
     return (
       <div className="auth-container">
         <div className="glass-panel auth-card">
           <div className="auth-header">
             <img src={giftBanner} alt="Gift Planner Logo" width="300" height="200" style={{ objectFit: 'cover' }} />
             <h1>Gift Planner</h1>
-            <p>Ułatw sobie i bliskim dawanie trafionych prezentów</p>
+            <p>Wpisz 4-cyfrowy kod PIN, aby uzyskać dostęp do aplikacji rodzinnej.</p>
           </div>
 
-          <form onSubmit={handleAuth}>
-            {authError && <div className="alert alert-danger">{authError}</div>}
+          <form onSubmit={handlePinSubmit}>
+            {pinError && <div className="alert alert-danger">{pinError}</div>}
             
-            {authMode === 'signup' && (
-              <div className="form-group">
-                <label>Twoje Imię i Nazwisko</label>
-                <input 
-                  type="text" 
-                  className="form-control" 
-                  value={authName} 
-                  onChange={e => setAuthName(e.target.value)} 
-                  placeholder="np. Jan Kowalski"
-                  required 
-                />
-              </div>
-            )}
-
-            <div className="form-group">
-              <label>Adres E-mail</label>
+            <div className="form-group" style={{ textAlign: 'center' }}>
+              <label style={{ textAlign: 'center' }}>Kod Dostępu</label>
               <input 
-                type="email" 
+                type="password" 
+                maxLength={4}
+                pattern="[0-9]*"
+                inputMode="numeric"
                 className="form-control" 
-                value={authEmail} 
-                onChange={e => setAuthEmail(e.target.value)} 
-                placeholder="twoj@email.com"
+                value={pin} 
+                onChange={e => setPin(e.target.value.replace(/\D/g, ''))} 
+                placeholder="••••"
+                style={{ textAlign: 'center', fontSize: '2rem', letterSpacing: '0.5rem', padding: '0.5rem' }}
                 required 
+                autoFocus
               />
             </div>
 
+            <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '1rem' }}>
+              Odblokuj
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Name entry screen (if unlocked but no user session)
+  if (!user) {
+    return (
+      <div className="auth-container">
+        <div className="glass-panel auth-card">
+          <div className="auth-header">
+            <img src={giftBanner} alt="Gift Planner Logo" width="300" height="200" style={{ objectFit: 'cover' }} />
+            <h1>Kim jesteś?</h1>
+            <p>Wpisz swoje imię lub pseudonim, aby bliscy wiedzieli, kto rezerwuje i dodaje prezenty.</p>
+          </div>
+
+          <form onSubmit={handleNameSubmit}>
+            {authError && <div className="alert alert-danger">{authError}</div>}
+            
             <div className="form-group">
-              <label>Hasło</label>
+              <label>Twoje Imię / Nick</label>
               <input 
-                type="password" 
+                type="text" 
                 className="form-control" 
-                value={authPassword} 
-                onChange={e => setAuthPassword(e.target.value)} 
-                placeholder="••••••••"
+                value={authName} 
+                onChange={e => setAuthName(e.target.value)} 
+                placeholder="np. Wujek Jacek, Mama, Kasia"
                 required 
+                autoFocus
               />
             </div>
 
             <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '1rem' }} disabled={authLoading}>
-              {authLoading ? 'Ładowanie...' : authMode === 'login' ? 'Zaloguj się' : 'Zarejestruj się'}
+              {authLoading ? 'Logowanie...' : 'Wejdź do aplikacji'}
             </button>
           </form>
 
           <div className="auth-switch">
-            {authMode === 'login' ? (
-              <>
-                Nie masz konta?{' '}
-                <button className="btn-link" onClick={() => setAuthMode('signup')}>
-                  Zarejestruj się teraz
-                </button>
-              </>
-            ) : (
-              <>
-                Masz już konto?{' '}
-                <button className="btn-link" onClick={() => setAuthMode('login')}>
-                  Zaloguj się
-                </button>
-              </>
-            )}
+            <button className="btn-link" onClick={() => {
+              setUnlocked(false);
+              localStorage.removeItem('gp_unlocked');
+              setPin('');
+            }}>
+              🔒 Zablokuj aplikację
+            </button>
           </div>
         </div>
       </div>
