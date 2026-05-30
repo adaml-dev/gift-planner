@@ -96,6 +96,7 @@ function App() {
   const [newGiftPrice, setNewGiftPrice] = useState('');
   const [giftVariants, setGiftVariants] = useState<{ label: string; url: string }[]>([{ label: '', url: '' }]);
   const [newGiftIsSecret, setNewGiftIsSecret] = useState(false);
+  const [newAppPin, setNewAppPin] = useState('');
 
   // General loading & message states
   const [loading, setLoading] = useState(false);
@@ -266,16 +267,20 @@ function App() {
     setLoading(false);
   };
 
-  const handlePinSubmit = (e: React.FormEvent) => {
+  const handlePinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const correctPin = import.meta.env.VITE_APP_PIN || '2026';
-    if (pin === correctPin) {
+    setLoading(true);
+    const { data, error } = await supabase.rpc('verify_app_pin', { input_pin: pin });
+    if (error) {
+      setPinError('Błąd połączenia z bazą: ' + error.message);
+    } else if (data === true) {
       setUnlocked(true);
       localStorage.setItem('gp_unlocked', 'true');
       setPinError('');
     } else {
       setPinError('Niepoprawny kod PIN. Spróbuj ponownie.');
     }
+    setLoading(false);
   };
 
   const handleSelectProfile = async (profile: Profile) => {
@@ -384,7 +389,6 @@ function App() {
       if (profileError) {
         setToast({ message: 'Konto utworzone, ale błąd profilu: ' + profileError.message, type: 'error' });
       } else {
-        setShowAddMemberModal(false);
         setNewMemberName('');
         setNewMemberIsAdmin(false);
         setNewMemberPassword('');
@@ -436,6 +440,26 @@ function App() {
         setLoading(false);
       }
     });
+  };
+
+  const handleSavePin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAppPin.trim() || newAppPin.trim().length < 4) {
+      setToast({ message: 'Kod PIN musi mieć co najmniej 4 cyfry!', type: 'error' });
+      return;
+    }
+    setLoading(true);
+    const { error } = await supabase
+      .from('gp_settings')
+      .upsert({ key: 'app_pin', value: newAppPin.trim() });
+    
+    if (error) {
+      setToast({ message: 'Błąd zapisu PIN: ' + error.message, type: 'error' });
+    } else {
+      setToast({ message: 'Kod PIN dostępu do aplikacji został zmieniony!', type: 'success' });
+      setNewAppPin('');
+    }
+    setLoading(false);
   };
 
   const handleLogout = async () => {
@@ -1542,6 +1566,32 @@ function App() {
                 })}
               </div>
             </div>
+
+            {/* C. Change App access PIN */}
+            <form onSubmit={handleSavePin} style={{ borderTop: '1px solid var(--border)', paddingTop: '1.5rem', marginTop: '1.5rem' }}>
+              <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem' }}>Główny PIN dostępu do aplikacji</h3>
+              <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <div className="form-group" style={{ flex: 2, margin: 0 }}>
+                  <label>Nowy 4-cyfrowy kod PIN *</label>
+                  <input 
+                    type="password" 
+                    maxLength={4}
+                    pattern="[0-9]*"
+                    inputMode="numeric"
+                    className="form-control" 
+                    value={newAppPin}
+                    onChange={e => setNewAppPin(e.target.value.replace(/\D/g, ''))}
+                    placeholder="np. 2026"
+                    required 
+                  />
+                </div>
+                <div style={{ flex: 1, display: 'flex', gap: '1rem' }}>
+                  <button type="submit" className="btn btn-primary" style={{ width: '100%', height: '42px', padding: '0 1rem' }} disabled={loading}>
+                    Zapisz PIN
+                  </button>
+                </div>
+              </div>
+            </form>
           </div>
         </div>
       )}
