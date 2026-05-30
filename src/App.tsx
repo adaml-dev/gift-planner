@@ -60,6 +60,7 @@ interface Booking {
   created_at: string;
   is_group?: boolean;
   group_id?: string | null;
+  is_approved?: boolean;
 }
 
 interface Vote {
@@ -282,7 +283,8 @@ function App() {
     // That's handled at Supabase RLS level.
     const { data } = await supabase
       .from('gp_bookings')
-      .select('*');
+      .select('*')
+      .order('created_at', { ascending: true });
     setBookings(data || []);
   };
 
@@ -893,86 +895,227 @@ function App() {
   
   const sortedGoscieGifts = [...goscieGifts].sort((a, b) => getVoteCount(b.id) - getVoteCount(a.id));
 
-  // Render booking cells inside table
-  const renderGiftBookingsCell = (gift: Gift) => {
+  interface ReservationItem {
+    id: string; // group_id for group, id for individual
+    is_group: boolean;
+    group_id: string | null;
+    user_ids: string[];
+    created_at: string;
+    is_approved: boolean;
+  }
+
+  const handleToggleApproveBooking = async (res: ReservationItem, approve: boolean) => {
+    setLoading(true);
+    let query = supabase.from('gp_bookings').update({ is_approved: approve });
+    if (res.is_group && res.group_id) {
+      query = query.eq('group_id', res.group_id);
+    } else {
+      query = query.eq('id', res.id);
+    }
+
+    const { error } = await query;
+    if (error) {
+      setToast({ message: 'Nie udało się zmienić statusu zatwierdzenia: ' + error.message, type: 'error' });
+    } else {
+      if (activeOccasion) {
+        await fetchBookings(activeOccasion.id);
+      }
+      setToast({ 
+        message: approve ? 'Zatwierdzono zakup! Rezerwacja stała się poleceniem zakupu.' : 'Cofnięto zatwierdzenie zakupu.', 
+        type: 'success' 
+      });
+    }
+    setLoading(false);
+  };
+
+  const renderGiftQueueAndActions = (gift: Gift) => {
     const giftBookings = bookings.filter(b => b.gift_id === gift.id);
-    const individualBookings = giftBookings.filter(b => !b.group_id);
-    const groupBookingsMap: Record<string, Booking[]> = {};
+    const reservations: ReservationItem[] = [];
+
     giftBookings.forEach(b => {
-      if (b.group_id) {
-        if (!groupBookingsMap[b.group_id]) {
-          groupBookingsMap[b.group_id] = [];
+      if (b.is_group && b.group_id) {
+        let res = reservations.find(r => r.is_group && r.group_id === b.group_id);
+        if (!res) {
+          res = {
+            id: b.group_id,
+            is_group: true,
+            group_id: b.group_id,
+            user_ids: [],
+            created_at: b.created_at,
+            is_approved: !!b.is_approved
+          };
+          reservations.push(res);
         }
-        groupBookingsMap[b.group_id].push(b);
+        if (!res.user_ids.includes(b.user_id)) {
+          res.user_ids.push(b.user_id);
+        }
+        if (new Date(b.created_at) < new Date(res.created_at)) {
+          res.created_at = b.created_at;
+        }
+        if (b.is_approved) {
+          res.is_approved = true;
+        }
+      } else {
+        reservations.push({
+          id: b.id,
+          is_group: false,
+          group_id: null,
+          user_ids: [b.user_id],
+          created_at: b.created_at,
+          is_approved: !!b.is_approved
+        });
       }
     });
 
+    // Sort reservations by created_at ascending to form a queue
+    reservations.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
     const myBooking = giftBookings.find(b => b.user_id === user?.id);
     const hasMyBooking = !!myBooking;
+    const approvedReservation = reservations.find(r => r.is_approved);
+    const hasApproved = !!approvedReservation;
+    const isOrganizer = activeOccasion?.creator_id === user?.id;
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: '150px' }}>
-        {/* Individual Bookings */}
-        {individualBookings.map(b => {
-          const isMe = b.user_id === user?.id;
-          return (
-            <div key={b.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', background: 'rgba(255, 255, 255, 0.03)', padding: '0.25rem 0.5rem', borderRadius: '6px', fontSize: '0.8rem' }}>
-              <span>🔒 {isMe ? 'Ty' : (profiles[b.user_id]?.display_name || 'Ktoś')}</span>
-              {isMe && (
-                <button 
-                  className="btn btn-secondary" 
-                  style={{ padding: '0.15rem 0.4rem', fontSize: '0.7rem' }} 
-                  onClick={() => handleUnbook(gift.id)}
-                >
-                  Anuluj
-                </button>
-              )}
-            </div>
-          );
-        })}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', width: '100%' }}>
+        {reservations.length > 0 && (
+          <div className="bookings-queue" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {reservations.map((res, idx) => {
+              const isMyRes = res.user_ids.includes(user?.id);
+              const memberNames = res.user_ids
+                .map(uid => uid === user?.id ? 'Ty' : (profiles[uid]?.display_name || 'Znajomy'))
+                .join(', ');
 
-        {/* Group Bookings */}
-        {Object.entries(groupBookingsMap).map(([groupId, groupBookingsList], idx) => {
-          const isMeInGroup = groupBookingsList.some(b => b.user_id === user?.id);
-          const memberNames = groupBookingsList.map(b => profiles[b.user_id]?.display_name || 'Znajomy').join(', ');
-          
-          return (
-            <div key={groupId} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', background: 'rgba(170, 59, 255, 0.05)', padding: '0.25rem 0.5rem', borderRadius: '6px', fontSize: '0.8rem', border: '1px solid rgba(170, 59, 255, 0.15)' }}>
-              <span style={{ color: 'var(--primary)', fontWeight: 500 }}>👥 Składka #{idx + 1}: {memberNames}</span>
-              {isMeInGroup ? (
-                <button 
-                  className="btn btn-secondary" 
-                  style={{ padding: '0.15rem 0.4rem', fontSize: '0.7rem', width: '100%' }} 
-                  onClick={() => handleUnbook(gift.id)}
+              return (
+                <div 
+                  key={res.id} 
+                  style={{ 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    gap: '0.35rem', 
+                    background: res.is_approved ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255, 255, 255, 0.02)', 
+                    padding: '0.6rem 0.8rem', 
+                    borderRadius: '8px', 
+                    border: res.is_approved ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid rgba(255, 255, 255, 0.05)',
+                    fontSize: '0.85rem'
+                  }}
                 >
-                  Opuść
-                </button>
-              ) : (
-                <button 
-                  className="btn btn-primary" 
-                  style={{ padding: '0.15rem 0.4rem', fontSize: '0.7rem', width: '100%' }} 
-                  onClick={() => handleBook(gift.id, true, groupId)}
-                  disabled={hasMyBooking}
-                >
-                  Dołącz
-                </button>
-              )}
-            </div>
-          );
-        })}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>
+                      #{idx + 1} {res.is_group ? '👥 Składka' : '👤 Indywidualnie'}
+                    </span>
+                    {res.is_approved ? (
+                      <span 
+                        className="badge badge-success" 
+                        style={{ 
+                          fontSize: '0.7rem', 
+                          background: 'rgba(16, 185, 129, 0.15)', 
+                          color: '#10b981', 
+                          border: '1px solid rgba(16, 185, 129, 0.2)',
+                          padding: '0.15rem 0.4rem',
+                          borderRadius: '4px'
+                        }}
+                      >
+                        ✓ Polecenie zakupu
+                      </span>
+                    ) : (
+                      <span 
+                        className="badge badge-warning" 
+                        style={{ 
+                          fontSize: '0.7rem', 
+                          background: 'rgba(245, 158, 11, 0.15)', 
+                          color: '#fba524', 
+                          border: '1px solid rgba(245, 158, 11, 0.2)',
+                          padding: '0.15rem 0.4rem',
+                          borderRadius: '4px'
+                        }}
+                      >
+                        ⏳ W kolejce
+                      </span>
+                    )}
+                  </div>
+                  
+                  <div style={{ color: 'white', fontWeight: 500 }}>
+                    Kupujący: <strong style={{ color: 'var(--text-primary)' }}>{memberNames}</strong>
+                  </div>
 
-        {/* Booking Actions */}
+                  {/* Actions for this specific reservation item */}
+                  <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
+                    {isOrganizer && (
+                      <>
+                        {res.is_approved ? (
+                          <button 
+                            className="btn btn-secondary" 
+                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#ef4444' }} 
+                            onClick={() => handleToggleApproveBooking(res, false)}
+                          >
+                            🔄 Cofnij zatwierdzenie
+                          </button>
+                        ) : (
+                          !hasApproved && (
+                            <button 
+                              className="btn btn-primary" 
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', background: '#10b981', borderColor: '#10b981' }} 
+                              onClick={() => handleToggleApproveBooking(res, true)}
+                            >
+                              ✅ Zatwierdź zakup
+                            </button>
+                          )
+                        )}
+                      </>
+                    )}
+
+                    {isMyRes && (
+                      <button 
+                        className="btn btn-secondary" 
+                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }} 
+                        onClick={() => handleUnbook(gift.id)}
+                      >
+                        {res.is_approved ? 'Anuluj zakup' : (res.is_group ? 'Opuść składkę' : 'Anuluj rezerwację')}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* General Reservation action button */}
         {!hasMyBooking && (
-          <button 
-            className="btn btn-primary" 
-            style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', width: '100%' }} 
-            onClick={() => setBookingModal({ show: true, giftId: gift.id, giftName: gift.name })}
-          >
-            Rezerwacja
-          </button>
+          <div style={{ marginTop: '0.25rem' }}>
+            {hasApproved ? (
+              <div 
+                style={{ 
+                  textAlign: 'center', 
+                  padding: '0.5rem', 
+                  background: 'rgba(255, 255, 255, 0.02)', 
+                  border: '1px dashed rgba(255, 255, 255, 0.1)', 
+                  borderRadius: '8px', 
+                  color: 'var(--text-secondary)',
+                  fontSize: '0.8rem'
+                }}
+              >
+                🔒 Zakup został zatwierdzony i sfinalizowany.
+              </div>
+            ) : (
+              <button 
+                className="btn btn-primary" 
+                style={{ padding: '0.5rem 1rem', fontSize: '0.85rem', width: '100%' }} 
+                onClick={() => setBookingModal({ show: true, giftId: gift.id, giftName: gift.name })}
+              >
+                Rezerwacja
+              </button>
+            )}
+          </div>
         )}
       </div>
     );
+  };
+
+  // Render booking cells inside table
+  const renderGiftBookingsCell = (gift: Gift) => {
+    return renderGiftQueueAndActions(gift);
   };
 
   // Render list of gifts in a compact table view
@@ -1020,24 +1163,6 @@ function App() {
 
   // Render a single gift card (for tiles view)
   const renderGiftCard = (gift: Gift, isGuestTab: boolean) => {
-    const giftBookings = bookings.filter(b => b.gift_id === gift.id);
-    
-    // Filter individual bookings
-    const individualBookings = giftBookings.filter(b => !b.is_group);
-    
-    // Group bookings by group_id
-    const groupBookingsMap: Record<string, Booking[]> = {};
-    giftBookings.forEach(b => {
-      if (b.is_group && b.group_id) {
-        if (!groupBookingsMap[b.group_id]) {
-          groupBookingsMap[b.group_id] = [];
-        }
-        groupBookingsMap[b.group_id].push(b);
-      }
-    });
-
-    const myBooking = giftBookings.find(b => b.user_id === user?.id);
-    const hasMyBooking = !!myBooking;
     const isGiftCreator = gift.suggested_by === user?.id;
 
     const votesCount = getVoteCount(gift.id);
@@ -1088,69 +1213,7 @@ function App() {
         {/* Bookings section (hidden from occasion owner) */}
         {!isOwnerActiveOccasion && (
           <div style={{ marginTop: 'auto', paddingTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            
-            {/* 1. Existing Individual Bookings */}
-            {individualBookings.map(b => {
-              const isMe = b.user_id === user?.id;
-              return (
-                <div key={b.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', background: 'rgba(255, 255, 255, 0.03)', padding: '0.75rem', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                  <div className="gift-status-badge booked" style={{ margin: 0, justifyContent: 'flex-start' }}>
-                    🔒 Kupuje sam: <strong>{isMe ? 'Ty' : (profiles[b.user_id]?.display_name || 'znajomy')}</strong>
-                  </div>
-                  {isMe && (
-                    <button className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', width: '100%' }} onClick={() => handleUnbook(gift.id)}>
-                      Anuluj zakup
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-
-            {/* 2. Existing Group Bookings */}
-            {Object.entries(groupBookingsMap).map(([groupId, groupBookingsList], idx) => {
-              const isMeInGroup = groupBookingsList.some(b => b.user_id === user?.id);
-              const memberNames = groupBookingsList.map(b => profiles[b.user_id]?.display_name || 'Znajomy').join(', ');
-              
-              return (
-                <div key={groupId} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', background: 'rgba(170, 59, 255, 0.05)', padding: '0.75rem', borderRadius: '10px', border: '1px solid rgba(170, 59, 255, 0.15)' }}>
-                  <div className="gift-status-badge booked" style={{ margin: 0, background: 'none', color: 'var(--primary)', justifyContent: 'flex-start' }}>
-                    👥 Składka #{idx + 1}: <strong>{memberNames}</strong>
-                  </div>
-                  <div className="gift-actions" style={{ margin: 0, border: 'none', paddingTop: 0 }}>
-                    {isMeInGroup ? (
-                      <button className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', width: '100%' }} onClick={() => handleUnbook(gift.id)}>
-                        Opuść składkę
-                      </button>
-                    ) : (
-                      <button 
-                        className="btn btn-primary" 
-                        style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', width: '100%' }} 
-                        onClick={() => handleBook(gift.id, true, groupId)}
-                        disabled={hasMyBooking}
-                      >
-                        Dołącz do tej składki
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* 3. Actions for Users who haven't booked this gift yet */}
-            {!hasMyBooking && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textAlign: 'center', marginBottom: '0.25rem' }}>
-                  Chcesz podarować ten prezent?
-                </div>
-                <button 
-                  className="btn btn-primary" 
-                  style={{ padding: '0.5rem 1rem', fontSize: '0.85rem', width: '100%' }} 
-                  onClick={() => setBookingModal({ show: true, giftId: gift.id, giftName: gift.name })}
-                >
-                  Rezerwacja
-                </button>
-              </div>
-            )}
+            {renderGiftQueueAndActions(gift)}
           </div>
         )}
 
