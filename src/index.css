@@ -965,12 +965,14 @@ h1 {
     margin-bottom: 0.25rem;
   }
 
-  /* Actions column alignment on mobile */
-  .compact-table td[data-label="Akcje"] {
+  /* Actions/Details column alignment on mobile */
+  .compact-table td[data-label="Akcje"],
+  .compact-table td[data-label="Szczegóły"] {
     justify-content: flex-end;
   }
-  .compact-table td[data-label="Akcje"]::before {
-    display: none; /* Hide 'Akcje' label to save space */
+  .compact-table td[data-label="Akcje"]::before,
+  .compact-table td[data-label="Szczegóły"]::before {
+    display: none; /* Hide labels to save space */
   }
 }
 

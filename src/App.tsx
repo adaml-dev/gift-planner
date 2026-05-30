@@ -115,6 +115,8 @@ function App() {
   const [errorMsg, setErrorMsg] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [bookingModal, setBookingModal] = useState<{ show: boolean; giftId: string; giftName: string } | null>(null);
+  const [activeOccasionDetails, setActiveOccasionDetails] = useState<Occasion | null>(null);
+  const [activeGiftDetails, setActiveGiftDetails] = useState<Gift | null>(null);
   const [confirmModal, setConfirmModal] = useState<{
     show: boolean;
     title: string;
@@ -813,7 +815,7 @@ function App() {
   };
 
   // Render list of gifts in a compact table view
-  const renderGiftsTable = (giftsList: Gift[], isGuestTab: boolean) => {
+  const renderGiftsTable = (giftsList: Gift[]) => {
     return (
       <div className="table-responsive">
         <table className="compact-table">
@@ -821,75 +823,27 @@ function App() {
             <tr>
               <th>Prezent</th>
               <th>Cena</th>
-              <th>Linki</th>
-              {!isOwnerActiveOccasion && <th>Zakup</th>}
-              {isGuestTab && <th>Głosy</th>}
-              <th style={{ textAlign: 'right' }}>Akcje</th>
+              <th style={{ textAlign: 'right' }}>Szczegóły</th>
             </tr>
           </thead>
           <tbody>
             {giftsList.map(gift => {
-              const isGiftCreator = gift.suggested_by === user?.id;
-              const votesCount = getVoteCount(gift.id);
-              const userVoted = hasUserVoted(gift.id);
-
               return (
                 <tr key={gift.id}>
-                  <td data-label="Prezent">
-                    <div style={{ fontWeight: 500, fontSize: '0.95rem' }}>{gift.name}</div>
-                    {gift.description && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>{gift.description}</div>}
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                      Zaproponował: {profiles[gift.suggested_by || '']?.display_name || 'Solenizant'}
-                    </div>
+                  <td data-label="Prezent" style={{ fontWeight: 500 }}>
+                    {gift.name}
                   </td>
                   <td data-label="Cena" style={{ whiteSpace: 'nowrap' }}>
                     {gift.price ? <strong style={{ color: 'var(--text-primary)' }}>{gift.price} zł</strong> : <span style={{ color: 'var(--text-secondary)' }}>—</span>}
                   </td>
-                  <td data-label="Linki">
-                    <div className="gift-links-list" style={{ margin: 0, gap: '0.25rem' }}>
-                      {gift.urls && gift.urls.length > 0 ? (
-                        gift.urls.map((link, idx) => (
-                          <a key={idx} href={link.url} target="_blank" rel="noopener noreferrer" className="gift-link-tag" style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}>
-                            🔗 {link.label}
-                          </a>
-                        ))
-                      ) : (
-                        gift.url ? (
-                          <a href={gift.url} target="_blank" rel="noopener noreferrer" className="gift-link-tag" style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}>
-                            🔗 Sklep
-                          </a>
-                        ) : (
-                          <span style={{ color: 'var(--text-secondary)' }}>—</span>
-                        )
-                      )}
-                    </div>
-                  </td>
-                  {!isOwnerActiveOccasion && (
-                    <td data-label="Zakup">
-                      {renderGiftBookingsCell(gift)}
-                    </td>
-                  )}
-                  {isGuestTab && (
-                    <td data-label="Głosy">
-                      <button 
-                        className={`btn ${userVoted ? 'btn-primary' : 'btn-secondary'}`} 
-                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
-                        onClick={() => userVoted ? handleUnvote(gift.id) : handleVote(gift.id)}
-                      >
-                        👍 {votesCount}
-                      </button>
-                    </td>
-                  )}
-                  <td data-label="Akcje" style={{ textAlign: 'right' }}>
-                    {(isGiftCreator || activeOccasion?.creator_id === user?.id) && (
-                      <button 
-                        className="btn btn-danger btn-secondary" 
-                        style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }}
-                        onClick={() => handleDeleteGift(gift.id)}
-                      >
-                        Usuń
-                      </button>
-                    )}
+                  <td data-label="Szczegóły" style={{ textAlign: 'right' }}>
+                    <button 
+                      className="btn btn-secondary" 
+                      style={{ padding: '0.3rem 0.6rem', fontSize: '0.85rem', fontWeight: 'bold' }} 
+                      onClick={() => setActiveGiftDetails(gift)}
+                    >
+                      ...
+                    </button>
                   </td>
                 </tr>
               );
@@ -1298,52 +1252,27 @@ function App() {
               <table className="compact-table">
                 <thead>
                   <tr>
-                    <th>Kiedy</th>
                     <th>Okazja</th>
-                    <th>Dla kogo</th>
-                    <th>Zostało</th>
-                    <th>Stworzył</th>
-                    <th style={{ textAlign: 'right' }}>Akcje</th>
+                    <th>Data</th>
+                    <th style={{ textAlign: 'right' }}>Szczegóły</th>
                   </tr>
                 </thead>
                 <tbody>
                   {occasions.map(occ => {
-                    const daysLeft = getDaysLeft(occ.date);
-                    const isCreator = occ.creator_id === user.id;
-                    const isOwner = occ.owner_id === user.id;
-                    const badgeClass = daysLeft === 'Dziś!' || daysLeft === 'Jutro!' ? 'badge-success' : daysLeft === 'Już się odbyło' ? 'badge-danger' : 'badge-info';
-
                     return (
-                      <tr key={occ.id} className="clickable" onClick={(e) => {
-                        if ((e.target as HTMLElement).closest('.btn-action-no-nav')) return;
-                        selectOccasion(occ);
-                      }}>
-                        <td data-label="Kiedy" style={{ whiteSpace: 'nowrap' }}>
+                      <tr key={occ.id}>
+                        <td data-label="Okazja" style={{ fontWeight: 500 }}>{occ.title}</td>
+                        <td data-label="Data" style={{ whiteSpace: 'nowrap' }}>
                           📅 {formatDate(occ.date)} {occ.time && `o ${occ.time}`}
                         </td>
-                        <td data-label="Okazja" style={{ fontWeight: 500 }}>{occ.title}</td>
-                        <td data-label="Dla kogo">
-                          <strong>{occ.owner_name}</strong> {isOwner && <span style={{ color: 'var(--primary)', fontSize: '0.8rem' }}>(Ty)</span>}
-                        </td>
-                        <td data-label="Zostało">
-                          <span className={`badge ${badgeClass}`}>
-                            {daysLeft}
-                          </span>
-                        </td>
-                        <td data-label="Stworzył" style={{ whiteSpace: 'nowrap' }}>
-                          {profiles[occ.creator_id]?.display_name || 'Ktoś'}
-                        </td>
-                        <td data-label="Akcje" style={{ textAlign: 'right' }}>
-                          <div style={{ display: 'inline-flex', gap: '0.5rem', justifyContent: 'flex-end' }} className="btn-action-no-nav">
-                            <button className="btn btn-secondary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }} onClick={() => selectOccasion(occ)}>
-                              Otwórz
-                            </button>
-                            {isCreator && (
-                              <button className="btn btn-danger btn-secondary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }} onClick={(e) => handleDeleteOccasion(occ.id, e)}>
-                                Usuń
-                              </button>
-                            )}
-                          </div>
+                        <td data-label="Szczegóły" style={{ textAlign: 'right' }}>
+                          <button 
+                            className="btn btn-secondary" 
+                            style={{ padding: '0.3rem 0.6rem', fontSize: '0.85rem', fontWeight: 'bold' }} 
+                            onClick={() => setActiveOccasionDetails(occ)}
+                          >
+                            ...
+                          </button>
                         </td>
                       </tr>
                     );
@@ -1504,7 +1433,7 @@ function App() {
                     </div>
                   ) : (
                     giftsView === 'table' ? (
-                      renderGiftsTable(solenizantGifts, false)
+                      renderGiftsTable(solenizantGifts)
                     ) : (
                       <div className="gifts-grid">
                         {solenizantGifts.map(gift => renderGiftCard(gift, false))}
@@ -1532,7 +1461,7 @@ function App() {
                     </div>
                   ) : (
                     giftsView === 'table' ? (
-                      renderGiftsTable(sortedGoscieGifts, true)
+                      renderGiftsTable(sortedGoscieGifts)
                     ) : (
                       <div className="gifts-grid">
                         {sortedGoscieGifts.map(gift => renderGiftCard(gift, true))}
@@ -1958,6 +1887,200 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* ----------------- EVENT DETAILS MODAL ----------------- */}
+      {activeOccasionDetails && (
+        <div className="modal-overlay" style={{ zIndex: 1900 }}>
+          <div className="glass-panel modal-content" style={{ maxWidth: '500px' }}>
+            <div className="modal-header">
+              <h2>Szczegóły wydarzenia</h2>
+              <button className="close-btn" onClick={() => setActiveOccasionDetails(null)}>×</button>
+            </div>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', textAlign: 'left' }}>
+              <div>
+                <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Nazwa okazji:</strong>
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, color: 'white', marginTop: '0.15rem' }}>{activeOccasionDetails.title}</div>
+              </div>
+              <div>
+                <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Dla kogo:</strong>
+                <div style={{ fontSize: '1rem', marginTop: '0.15rem' }}>{activeOccasionDetails.owner_name}</div>
+              </div>
+              <div>
+                <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Kiedy:</strong>
+                <div style={{ fontSize: '1rem', marginTop: '0.15rem' }}>
+                  📅 {formatDate(activeOccasionDetails.date)} {activeOccasionDetails.time && `o godz. ${activeOccasionDetails.time}`}
+                  <span className="badge badge-info" style={{ marginLeft: '0.5rem' }}>{getDaysLeft(activeOccasionDetails.date)}</span>
+                </div>
+              </div>
+              {activeOccasionDetails.location && (
+                <div>
+                  <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Lokalizacja:</strong>
+                  <div style={{ fontSize: '1rem', marginTop: '0.15rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    📍 {activeOccasionDetails.location}
+                    {activeOccasionDetails.google_maps_url && (
+                      <a href={activeOccasionDetails.google_maps_url} target="_blank" rel="noopener noreferrer" className="gift-link-tag" style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}>
+                        🗺️ Pokaż na mapie
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+              {activeOccasionDetails.description && (
+                <div>
+                  <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Opis / Uwagi:</strong>
+                  <div style={{ fontSize: '0.95rem', color: 'var(--text-secondary)', marginTop: '0.15rem', fontStyle: 'italic', background: 'rgba(255,255,255,0.02)', padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                    "{activeOccasionDetails.description}"
+                  </div>
+                </div>
+              )}
+              <div>
+                <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Stworzył:</strong>
+                <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
+                  {profiles[activeOccasionDetails.creator_id]?.display_name || 'Ktoś'}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
+              <button 
+                type="button" 
+                className="btn btn-secondary" 
+                style={{ flex: 1 }} 
+                onClick={() => setActiveOccasionDetails(null)}
+              >
+                Zamknij
+              </button>
+              <button 
+                type="button" 
+                className="btn btn-primary" 
+                style={{ flex: 1 }} 
+                onClick={() => {
+                  selectOccasion(activeOccasionDetails);
+                  setActiveOccasionDetails(null);
+                }}
+              >
+                Wejdź do środka
+              </button>
+              {activeOccasionDetails.creator_id === user?.id && (
+                <button 
+                  type="button" 
+                  className="btn btn-danger btn-secondary" 
+                  onClick={(e) => {
+                    handleDeleteOccasion(activeOccasionDetails.id, e);
+                    setActiveOccasionDetails(null);
+                  }}
+                >
+                  Usuń
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------- GIFT DETAILS MODAL ----------------- */}
+      {activeGiftDetails && (
+        <div className="modal-overlay" style={{ zIndex: 1900 }}>
+          <div className="glass-panel modal-content" style={{ maxWidth: '500px' }}>
+            <div className="modal-header">
+              <h2>Szczegóły prezentu</h2>
+              <button className="close-btn" onClick={() => setActiveGiftDetails(null)}>×</button>
+            </div>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', textAlign: 'left' }}>
+              <div>
+                <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Nazwa prezentu:</strong>
+                <div style={{ fontSize: '1.15rem', fontWeight: 600, color: 'white', marginTop: '0.15rem' }}>{activeGiftDetails.name}</div>
+              </div>
+              {activeGiftDetails.description && (
+                <div>
+                  <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Opis:</strong>
+                  <div style={{ fontSize: '0.95rem', color: 'var(--text-secondary)', marginTop: '0.15rem', background: 'rgba(255,255,255,0.02)', padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                    {activeGiftDetails.description}
+                  </div>
+                </div>
+              )}
+              <div>
+                <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Cena:</strong>
+                <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'white', marginTop: '0.15rem' }}>
+                  {activeGiftDetails.price ? `${activeGiftDetails.price} zł` : '—'}
+                </div>
+              </div>
+              <div>
+                <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Linki do sklepów:</strong>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.25rem' }}>
+                  {activeGiftDetails.urls && activeGiftDetails.urls.length > 0 ? (
+                    activeGiftDetails.urls.map((link, idx) => (
+                      <a key={idx} href={link.url} target="_blank" rel="noopener noreferrer" className="gift-link-tag">
+                        🔗 {link.label}
+                      </a>
+                    ))
+                  ) : (
+                    activeGiftDetails.url ? (
+                      <a href={activeGiftDetails.url} target="_blank" rel="noopener noreferrer" className="gift-link-tag">
+                        🔗 Sklep
+                      </a>
+                    ) : (
+                      <span style={{ color: 'var(--text-secondary)' }}>Brak linków</span>
+                    )
+                  )}
+                </div>
+              </div>
+              <div>
+                <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Zaproponował:</strong>
+                <div style={{ fontSize: '0.9rem', marginTop: '0.15rem' }}>
+                  {profiles[activeGiftDetails.suggested_by || '']?.display_name || 'Solenizant'}
+                </div>
+              </div>
+              
+              {!isOwnerActiveOccasion && (
+                <div>
+                  <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Status / Zakup:</strong>
+                  <div style={{ marginTop: '0.35rem' }}>
+                    {renderGiftBookingsCell(activeGiftDetails)}
+                  </div>
+                </div>
+              )}
+
+              {(!isOwnerActiveOccasion && activeTab === 'goscie') && (
+                <div>
+                  <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Głosowanie:</strong>
+                  <div style={{ marginTop: '0.35rem' }}>
+                    <button 
+                      className={`btn ${hasUserVoted(activeGiftDetails.id) ? 'btn-primary' : 'btn-secondary'}`} 
+                      style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
+                      onClick={() => hasUserVoted(activeGiftDetails.id) ? handleUnvote(activeGiftDetails.id) : handleVote(activeGiftDetails.id)}
+                    >
+                      👍 {getVoteCount(activeGiftDetails.id)} Głosów
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
+              <button 
+                type="button" 
+                className="btn btn-secondary" 
+                style={{ flex: 1 }} 
+                onClick={() => setActiveGiftDetails(null)}
+              >
+                Zamknij
+              </button>
+              {(activeGiftDetails.suggested_by === user?.id || activeOccasion?.creator_id === user?.id) && (
+                <button 
+                  type="button" 
+                  className="btn btn-danger btn-secondary" 
+                  onClick={() => {
+                    handleDeleteGift(activeGiftDetails.id);
+                    setActiveGiftDetails(null);
+                  }}
+                >
+                  Usuń prezent
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ----------------- BOOKING MODAL ----------------- */}
       {bookingModal?.show && (
         <div className="modal-overlay" style={{ zIndex: 2000 }}>
