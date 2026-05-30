@@ -329,7 +329,8 @@ function App() {
       password,
       options: {
         data: {
-          display_name: newMemberName.trim()
+          display_name: newMemberName.trim(),
+          is_admin: newMemberIsAdmin
         }
       }
     });
