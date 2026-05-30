@@ -826,17 +826,17 @@ function App() {
 
               return (
                 <tr key={gift.id}>
-                  <td>
+                  <td data-label="Prezent">
                     <div style={{ fontWeight: 500, fontSize: '0.95rem' }}>{gift.name}</div>
                     {gift.description && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>{gift.description}</div>}
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
                       Zaproponował: {profiles[gift.suggested_by || '']?.display_name || 'Solenizant'}
                     </div>
                   </td>
-                  <td style={{ whiteSpace: 'nowrap' }}>
+                  <td data-label="Cena" style={{ whiteSpace: 'nowrap' }}>
                     {gift.price ? <strong style={{ color: 'var(--text-primary)' }}>{gift.price} zł</strong> : <span style={{ color: 'var(--text-secondary)' }}>—</span>}
                   </td>
-                  <td>
+                  <td data-label="Linki">
                     <div className="gift-links-list" style={{ margin: 0, gap: '0.25rem' }}>
                       {gift.urls && gift.urls.length > 0 ? (
                         gift.urls.map((link, idx) => (
@@ -856,12 +856,12 @@ function App() {
                     </div>
                   </td>
                   {!isOwnerActiveOccasion && (
-                    <td>
+                    <td data-label="Zakup">
                       {renderGiftBookingsCell(gift)}
                     </td>
                   )}
                   {isGuestTab && (
-                    <td>
+                    <td data-label="Głosy">
                       <button 
                         className={`btn ${userVoted ? 'btn-primary' : 'btn-secondary'}`} 
                         style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
@@ -871,7 +871,7 @@ function App() {
                       </button>
                     </td>
                   )}
-                  <td style={{ textAlign: 'right' }}>
+                  <td data-label="Akcje" style={{ textAlign: 'right' }}>
                     {(isGiftCreator || activeOccasion?.creator_id === user?.id) && (
                       <button 
                         className="btn btn-danger btn-secondary" 
@@ -1310,20 +1310,20 @@ function App() {
                         if ((e.target as HTMLElement).closest('.btn-action-no-nav')) return;
                         selectOccasion(occ);
                       }}>
-                        <td style={{ whiteSpace: 'nowrap' }}>📅 {formatDate(occ.date)}</td>
-                        <td style={{ fontWeight: 500 }}>{occ.title}</td>
-                        <td>
+                        <td data-label="Kiedy" style={{ whiteSpace: 'nowrap' }}>📅 {formatDate(occ.date)}</td>
+                        <td data-label="Okazja" style={{ fontWeight: 500 }}>{occ.title}</td>
+                        <td data-label="Dla kogo">
                           <strong>{occ.owner_name}</strong> {isOwner && <span style={{ color: 'var(--primary)', fontSize: '0.8rem' }}>(Ty)</span>}
                         </td>
-                        <td>
+                        <td data-label="Zostało">
                           <span className={`badge ${badgeClass}`}>
                             {daysLeft}
                           </span>
                         </td>
-                        <td style={{ whiteSpace: 'nowrap' }}>
+                        <td data-label="Stworzył" style={{ whiteSpace: 'nowrap' }}>
                           {profiles[occ.creator_id]?.display_name || 'Ktoś'}
                         </td>
-                        <td style={{ textAlign: 'right' }}>
+                        <td data-label="Akcje" style={{ textAlign: 'right' }}>
                           <div style={{ display: 'inline-flex', gap: '0.5rem', justifyContent: 'flex-end' }} className="btn-action-no-nav">
                             <button className="btn btn-secondary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }} onClick={() => selectOccasion(occ)}>
                               Otwórz
