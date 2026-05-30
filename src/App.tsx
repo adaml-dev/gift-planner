@@ -823,7 +823,10 @@ function App() {
             <tr>
               <th>Prezent</th>
               <th>Cena</th>
-              <th style={{ textAlign: 'right' }}>Szczegóły</th>
+              <th style={{ textAlign: 'right' }}>
+                <span className="hide-mobile">Szczegóły</span>
+                <span className="show-mobile-inline">...</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -1176,7 +1179,7 @@ function App() {
           <div className="navbar-user">
             {isAdmin && (
               <button className="btn btn-primary" style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }} onClick={() => setShowAddMemberModal(true)}>
-                👤 Zarządzaj rodziną
+                👤 <span className="hide-mobile">Zarządzaj rodziną</span><span className="show-mobile-inline">Rodzina</span>
               </button>
             )}
             <span style={{ fontSize: '0.95rem', color: 'var(--text-secondary)' }}>
@@ -1254,7 +1257,10 @@ function App() {
                   <tr>
                     <th>Okazja</th>
                     <th>Data</th>
-                    <th style={{ textAlign: 'right' }}>Szczegóły</th>
+                    <th style={{ textAlign: 'right' }}>
+                      <span className="hide-mobile">Szczegóły</span>
+                      <span className="show-mobile-inline">...</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1406,10 +1412,12 @@ function App() {
           {!isOwnerActiveOccasion && (
             <div className="tab-nav">
               <button className={`tab-btn ${activeTab === 'solenizant' ? 'active' : ''}`} onClick={() => setActiveTab('solenizant')}>
-                Lista życzeń {activeOccasion.owner_name} ({solenizantGifts.length})
+                <span className="hide-mobile">Lista życzeń {activeOccasion.owner_name}</span>
+                <span className="show-mobile-inline">Lista życzeń</span> ({solenizantGifts.length})
               </button>
               <button className={`tab-btn ${activeTab === 'goscie' ? 'active' : ''}`} onClick={() => setActiveTab('goscie')}>
-                Pomysły i niespodzianki gości ({goscieGifts.length})
+                <span className="hide-mobile">Pomysły i niespodzianki gości</span>
+                <span className="show-mobile-inline">Niespodzianki</span> ({goscieGifts.length})
               </button>
             </div>
           )}
@@ -1581,11 +1589,11 @@ function App() {
                 />
               </div>
 
-              <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
-                <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowOccasionModal(false)}>
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowOccasionModal(false)}>
                   Anuluj
                 </button>
-                <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={loading}>
+                <button type="submit" className="btn btn-primary" disabled={loading}>
                   Zapisz
                 </button>
               </div>
@@ -1706,11 +1714,11 @@ function App() {
                 </div>
               )}
 
-              <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
-                <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowGiftModal(false)}>
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowGiftModal(false)}>
                   Anuluj
                 </button>
-                <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={loading}>
+                <button type="submit" className="btn btn-primary" disabled={loading}>
                   Dodaj
                 </button>
               </div>
@@ -1940,11 +1948,10 @@ function App() {
                 </div>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
+            <div className="modal-actions">
               <button 
                 type="button" 
                 className="btn btn-secondary" 
-                style={{ flex: 1 }} 
                 onClick={() => setActiveOccasionDetails(null)}
               >
                 Zamknij
@@ -1952,7 +1959,6 @@ function App() {
               <button 
                 type="button" 
                 className="btn btn-primary" 
-                style={{ flex: 1 }} 
                 onClick={() => {
                   selectOccasion(activeOccasionDetails);
                   setActiveOccasionDetails(null);
@@ -2055,11 +2061,10 @@ function App() {
                 </div>
               )}
             </div>
-            <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
+            <div className="modal-actions">
               <button 
                 type="button" 
                 className="btn btn-secondary" 
-                style={{ flex: 1 }} 
                 onClick={() => setActiveGiftDetails(null)}
               >
                 Zamknij
@@ -2136,11 +2141,10 @@ function App() {
             <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem', fontSize: '1rem', lineHeight: '1.5' }}>
               {confirmModal.message}
             </p>
-            <div style={{ display: 'flex', gap: '1rem' }}>
+            <div className="modal-actions" style={{ marginTop: '1.5rem' }}>
               <button 
                 type="button" 
                 className="btn btn-secondary" 
-                style={{ flex: 1 }} 
                 onClick={() => setConfirmModal({ ...confirmModal, show: false })}
               >
                 Anuluj
@@ -2148,7 +2152,6 @@ function App() {
               <button 
                 type="button" 
                 className="btn btn-danger" 
-                style={{ flex: 1 }} 
                 onClick={async () => {
                   setConfirmModal(prev => ({ ...prev, show: false }));
                   await confirmModal.onConfirm();
