@@ -108,6 +108,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [bookingModal, setBookingModal] = useState<{ show: boolean; giftId: string; giftName: string } | null>(null);
   const [confirmModal, setConfirmModal] = useState<{
     show: boolean;
     title: string;
@@ -782,22 +783,13 @@ function App() {
 
         {/* Booking Actions */}
         {!hasMyBooking && (
-          <div style={{ display: 'flex', gap: '0.25rem' }}>
-            <button 
-              className="btn btn-primary" 
-              style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', flex: 1 }} 
-              onClick={() => handleBook(gift.id, false, null)}
-            >
-              Kupuję sam
-            </button>
-            <button 
-              className="btn btn-secondary" 
-              style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', flex: 1, border: '1px solid var(--primary)' }} 
-              onClick={() => handleBook(gift.id, true, generateUUID())}
-            >
-              +Składka
-            </button>
-          </div>
+          <button 
+            className="btn btn-primary" 
+            style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', width: '100%' }} 
+            onClick={() => setBookingModal({ show: true, giftId: gift.id, giftName: gift.name })}
+          >
+            Rezerwacja
+          </button>
         )}
       </div>
     );
@@ -1015,14 +1007,13 @@ function App() {
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textAlign: 'center', marginBottom: '0.25rem' }}>
                   Chcesz podarować ten prezent?
                 </div>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button className="btn btn-primary" style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', flex: 1 }} onClick={() => handleBook(gift.id, false, null)}>
-                    Kupuję sam
-                  </button>
-                  <button className="btn btn-secondary" style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', flex: 1 }} onClick={() => handleBook(gift.id, true, generateUUID())}>
-                    Nowa składka
-                  </button>
-                </div>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ padding: '0.5rem 1rem', fontSize: '0.85rem', width: '100%' }} 
+                  onClick={() => setBookingModal({ show: true, giftId: gift.id, giftName: gift.name })}
+                >
+                  Rezerwacja
+                </button>
               </div>
             )}
           </div>
@@ -1884,6 +1875,51 @@ function App() {
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* ----------------- BOOKING MODAL ----------------- */}
+      {bookingModal?.show && (
+        <div className="modal-overlay" style={{ zIndex: 2000 }}>
+          <div className="glass-panel modal-content" style={{ maxWidth: '450px', textAlign: 'center' }}>
+            <div className="modal-header" style={{ justifyContent: 'center', marginBottom: '1rem' }}>
+              <h2 style={{ margin: 0 }}>🎁 Rezerwacja prezentu</h2>
+            </div>
+            <div className="modal-body" style={{ marginBottom: '1.5rem', fontSize: '0.95rem', lineHeight: '1.5' }}>
+              Chcesz zarezerwować prezent <strong>{bookingModal.giftName}</strong>.
+              <br />
+              Wybierz, czy kupujesz go samodzielnie, czy chcesz zorganizować składkę:
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <button 
+                className="btn btn-primary" 
+                onClick={async () => {
+                  const gId = bookingModal.giftId;
+                  setBookingModal(null);
+                  await handleBook(gId, false, null);
+                }}
+              >
+                👤 Rezerwuję sam (kupuję samodzielnie)
+              </button>
+              <button 
+                className="btn btn-secondary" 
+                style={{ border: '1px solid var(--primary)' }}
+                onClick={async () => {
+                  const gId = bookingModal.giftId;
+                  setBookingModal(null);
+                  await handleBook(gId, true, generateUUID());
+                }}
+              >
+                👥 Składka (organizuję składkę grupową)
+              </button>
+              <button 
+                className="btn btn-secondary" 
+                style={{ marginTop: '0.5rem' }}
+                onClick={() => setBookingModal(null)}
+              >
+                Anuluj
+              </button>
+            </div>
           </div>
         </div>
       )}
