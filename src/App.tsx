@@ -86,11 +86,12 @@ function App() {
   const [initializing, setInitializing] = useState(true);
 
   // App navigation & core state
-  const [view, setView] = useState<'dashboard' | 'occasion'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'occasion' | 'my-bookings'>('dashboard');
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [occasions, setOccasions] = useState<Occasion[]>([]);
   const [activeOccasion, setActiveOccasion] = useState<Occasion | null>(null);
   const [gifts, setGifts] = useState<Gift[]>([]);
+  const [allGifts, setAllGifts] = useState<Gift[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [votes, setVotes] = useState<Vote[]>([]);
   
@@ -276,6 +277,29 @@ function App() {
       .eq('occasion_id', occasionId)
       .order('created_at', { ascending: true });
     setGifts(data || []);
+  };
+
+  const fetchAllGifts = async () => {
+    const { data } = await supabase
+      .from('gp_gifts')
+      .select('*');
+    setAllGifts(data || []);
+  };
+
+  const fetchMyBookingsData = async () => {
+    setLoading(true);
+    await Promise.all([
+      fetchBookings(),
+      fetchOccasions(),
+      fetchAllGifts()
+    ]);
+    setLoading(false);
+  };
+
+  const openMyBookings = async () => {
+    setView('my-bookings');
+    setActiveOccasion(null);
+    await fetchMyBookingsData();
   };
 
   const fetchBookings = async (_occasionId?: string) => {
@@ -895,25 +919,13 @@ function App() {
   
   const sortedGoscieGifts = [...goscieGifts].sort((a, b) => getVoteCount(b.id) - getVoteCount(a.id));
 
-  interface ReservationItem {
-    id: string; // group_id for group, id for individual
-    is_group: boolean;
-    group_id: string | null;
-    user_ids: string[];
-    created_at: string;
-    is_approved: boolean;
-  }
-
-  const handleToggleApproveBooking = async (res: ReservationItem, approve: boolean) => {
+  const handleToggleApproveBooking = async (bookingId: string, approve: boolean) => {
     setLoading(true);
-    let query = supabase.from('gp_bookings').update({ is_approved: approve });
-    if (res.is_group && res.group_id) {
-      query = query.eq('group_id', res.group_id);
-    } else {
-      query = query.eq('id', res.id);
-    }
+    const { error } = await supabase
+      .from('gp_bookings')
+      .update({ is_approved: approve })
+      .eq('id', bookingId);
 
-    const { error } = await query;
     if (error) {
       setToast({ message: 'Nie udało się zmienić statusu zatwierdzenia: ' + error.message, type: 'error' });
     } else {
@@ -930,81 +942,40 @@ function App() {
 
   const renderGiftQueueAndActions = (gift: Gift) => {
     const giftBookings = bookings.filter(b => b.gift_id === gift.id);
-    const reservations: ReservationItem[] = [];
-
-    giftBookings.forEach(b => {
-      if (b.is_group && b.group_id) {
-        let res = reservations.find(r => r.is_group && r.group_id === b.group_id);
-        if (!res) {
-          res = {
-            id: b.group_id,
-            is_group: true,
-            group_id: b.group_id,
-            user_ids: [],
-            created_at: b.created_at,
-            is_approved: !!b.is_approved
-          };
-          reservations.push(res);
-        }
-        if (!res.user_ids.includes(b.user_id)) {
-          res.user_ids.push(b.user_id);
-        }
-        if (new Date(b.created_at) < new Date(res.created_at)) {
-          res.created_at = b.created_at;
-        }
-        if (b.is_approved) {
-          res.is_approved = true;
-        }
-      } else {
-        reservations.push({
-          id: b.id,
-          is_group: false,
-          group_id: null,
-          user_ids: [b.user_id],
-          created_at: b.created_at,
-          is_approved: !!b.is_approved
-        });
-      }
-    });
-
-    // Sort reservations by created_at ascending to form a queue
-    reservations.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-
+    
     const myBooking = giftBookings.find(b => b.user_id === user?.id);
     const hasMyBooking = !!myBooking;
-    const approvedReservation = reservations.find(r => r.is_approved);
-    const hasApproved = !!approvedReservation;
+    const approvedBooking = giftBookings.find(b => b.is_approved);
+    const hasApproved = !!approvedBooking;
     const isOrganizer = activeOccasion?.creator_id === user?.id;
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', width: '100%' }}>
-        {reservations.length > 0 && (
+        {giftBookings.length > 0 && (
           <div className="bookings-queue" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            {reservations.map((res, idx) => {
-              const isMyRes = res.user_ids.includes(user?.id);
-              const memberNames = res.user_ids
-                .map(uid => uid === user?.id ? 'Ty' : (profiles[uid]?.display_name || 'Znajomy'))
-                .join(', ');
+            {giftBookings.map((b, idx) => {
+              const isMyBooking = b.user_id === user?.id;
+              const displayName = profiles[b.user_id]?.display_name || 'Znajomy';
 
               return (
                 <div 
-                  key={res.id} 
+                  key={b.id} 
                   style={{ 
                     display: 'flex', 
                     flexDirection: 'column', 
                     gap: '0.35rem', 
-                    background: res.is_approved ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255, 255, 255, 0.02)', 
+                    background: b.is_approved ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255, 255, 255, 0.02)', 
                     padding: '0.6rem 0.8rem', 
                     borderRadius: '8px', 
-                    border: res.is_approved ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid rgba(255, 255, 255, 0.05)',
+                    border: b.is_approved ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid rgba(255, 255, 255, 0.05)',
                     fontSize: '0.85rem'
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
                     <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>
-                      #{idx + 1} {res.is_group ? '👥 Składka' : '👤 Indywidualnie'}
+                      #{idx + 1} {b.is_group ? '👥 Składka' : '👤 Rezerwacja'}
                     </span>
-                    {res.is_approved ? (
+                    {b.is_approved ? (
                       <span 
                         className="badge badge-success" 
                         style={{ 
@@ -1036,18 +1007,18 @@ function App() {
                   </div>
                   
                   <div style={{ color: 'white', fontWeight: 500 }}>
-                    Kupujący: <strong style={{ color: 'var(--text-primary)' }}>{memberNames}</strong>
+                    Kupujący: <strong style={{ color: 'var(--text-primary)' }}>{isMyBooking ? 'Ty' : displayName}</strong>
                   </div>
 
-                  {/* Actions for this specific reservation item */}
+                  {/* Actions for this specific booking item */}
                   <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
                     {isOrganizer && (
                       <>
-                        {res.is_approved ? (
+                        {b.is_approved ? (
                           <button 
                             className="btn btn-secondary" 
                             style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#ef4444' }} 
-                            onClick={() => handleToggleApproveBooking(res, false)}
+                            onClick={() => handleToggleApproveBooking(b.id, false)}
                           >
                             🔄 Cofnij zatwierdzenie
                           </button>
@@ -1056,7 +1027,7 @@ function App() {
                             <button 
                               className="btn btn-primary" 
                               style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', background: '#10b981', borderColor: '#10b981' }} 
-                              onClick={() => handleToggleApproveBooking(res, true)}
+                              onClick={() => handleToggleApproveBooking(b.id, true)}
                             >
                               ✅ Zatwierdź zakup
                             </button>
@@ -1065,13 +1036,13 @@ function App() {
                       </>
                     )}
 
-                    {isMyRes && (
+                    {isMyBooking && (
                       <button 
                         className="btn btn-secondary" 
                         style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }} 
                         onClick={() => handleUnbook(gift.id)}
                       >
-                        {res.is_approved ? 'Anuluj zakup' : (res.is_group ? 'Opuść składkę' : 'Anuluj rezerwację')}
+                        {b.is_approved ? 'Anuluj zakup' : (b.is_group ? 'Opuść składkę' : 'Anuluj rezerwację')}
                       </button>
                     )}
                   </div>
@@ -1427,6 +1398,13 @@ function App() {
             <span style={{ fontSize: '0.95rem', color: 'var(--text-secondary)' }}>
               Cześć, <strong>{userProfile?.display_name || user.email?.split('@')[0]}</strong>!
             </span>
+            <button 
+              className={`btn ${view === 'my-bookings' ? 'btn-primary' : 'btn-secondary'}`} 
+              style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }} 
+              onClick={openMyBookings}
+            >
+              🛍️ <span className="hide-mobile">Moje rezerwacje</span><span className="show-mobile-inline">Moje</span>
+            </button>
             <button className="btn btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }} onClick={handleLogout}>
               Wyloguj
             </button>
@@ -1483,6 +1461,141 @@ function App() {
     <>
       {renderNav()}
       
+      {/* ----------------- MY RESERVATIONS VIEW ----------------- */}
+      {view === 'my-bookings' && (
+        <main className="container">
+          <div className="dashboard-header" style={{ marginBottom: '1.5rem' }}>
+            <div>
+              <button 
+                className="back-link" 
+                style={{ marginBottom: '0.75rem', display: 'block' }} 
+                onClick={() => setView('dashboard')}
+              >
+                ← Powrót do pulpitu
+              </button>
+              <h1>Moje Rezerwacje i Zakupy</h1>
+              <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
+                Lista prezentów, które rezerwujesz lub masz kupić w ramach zaplanowanych wydarzeń.
+              </p>
+            </div>
+          </div>
+
+          {loading && <div style={{ textAlign: 'center', padding: '2rem' }}>Ładowanie rezerwacji...</div>}
+
+          {!loading && (() => {
+            const myBookingsList = bookings.filter(b => b.user_id === user?.id);
+            if (myBookingsList.length === 0) {
+              return (
+                <div className="glass-panel empty-state">
+                  <div className="empty-state-icon">🛍️</div>
+                  <h3>Brak aktywnych rezerwacji</h3>
+                  <p style={{ marginBottom: '1.5rem' }}>
+                    Nie masz obecnie żadnych zarezerwowanych prezentów. Przejdź do aktywnego wydarzenia, aby zarezerwować prezent!
+                  </p>
+                  <button className="btn btn-primary" onClick={() => setView('dashboard')}>
+                    Przeglądaj wydarzenia
+                  </button>
+                </div>
+              );
+            }
+
+            return (
+              <div className="table-responsive">
+                <table className="compact-table">
+                  <thead>
+                    <tr>
+                      <th>Prezent</th>
+                      <th>Wydarzenie</th>
+                      <th>Data</th>
+                      <th>Cena</th>
+                      <th>Status</th>
+                      <th style={{ textAlign: 'right' }}>Akcje</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {myBookingsList.map(b => {
+                      const gift = allGifts.find(g => g.id === b.gift_id);
+                      if (!gift) return null;
+                      const occasion = occasions.find(o => o.id === gift.occasion_id);
+                      if (!occasion) return null;
+
+                      return (
+                        <tr key={b.id}>
+                          <td data-label="Prezent" style={{ fontWeight: 500 }}>
+                            {gift.name}
+                          </td>
+                          <td data-label="Wydarzenie">
+                            {occasion.title}
+                          </td>
+                          <td data-label="Data" style={{ whiteSpace: 'nowrap' }}>
+                            📅 {formatDate(occasion.date)}
+                          </td>
+                          <td data-label="Cena">
+                            {gift.price ? `${gift.price} zł` : '—'}
+                          </td>
+                          <td data-label="Status">
+                            {b.is_approved ? (
+                              <span 
+                                className="badge badge-success" 
+                                style={{ 
+                                  background: 'rgba(16, 185, 129, 0.15)', 
+                                  color: '#10b981', 
+                                  border: '1px solid rgba(16, 185, 129, 0.2)',
+                                  padding: '0.15rem 0.4rem',
+                                  borderRadius: '4px'
+                                }}
+                              >
+                                ✓ Zatwierdzony zakup
+                              </span>
+                            ) : (
+                              <span 
+                                className="badge badge-warning" 
+                                style={{ 
+                                  background: 'rgba(245, 158, 11, 0.15)', 
+                                  color: '#fba524', 
+                                  border: '1px solid rgba(245, 158, 11, 0.2)',
+                                  padding: '0.15rem 0.4rem',
+                                  borderRadius: '4px'
+                                }}
+                              >
+                                ⏳ Rezerwacja (kolejka)
+                              </span>
+                            )}
+                          </td>
+                          <td data-label="Akcje" style={{ textAlign: 'right' }}>
+                            <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end' }}>
+                              <button 
+                                className="btn btn-primary" 
+                                style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
+                                onClick={() => {
+                                  selectOccasion(occasion);
+                                }}
+                              >
+                                Pokaż okazję
+                              </button>
+                              <button 
+                                className="btn btn-secondary" 
+                                style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
+                                onClick={async () => {
+                                  await handleUnbook(gift.id);
+                                  await fetchMyBookingsData();
+                                }}
+                              >
+                                Anuluj
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
+        </main>
+      )}
+
       {/* ----------------- DASHBOARD VIEW ----------------- */}
       {view === 'dashboard' && (
         <main className="container">
