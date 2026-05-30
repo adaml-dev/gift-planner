@@ -35,6 +35,7 @@ interface Occasion {
   description?: string;
   created_at: string;
   is_archived?: boolean;
+  invited_user_ids?: string[];
 }
 
 interface Gift {
@@ -104,6 +105,7 @@ function App() {
   const [newOccasionLocation, setNewOccasionLocation] = useState('');
   const [newOccasionGoogleMapsUrl, setNewOccasionGoogleMapsUrl] = useState('');
   const [newOccasionDesc, setNewOccasionDesc] = useState('');
+  const [newOccasionInvitedIds, setNewOccasionInvitedIds] = useState<string[]>([]);
 
   const [showGiftModal, setShowGiftModal] = useState(false);
   const [newGiftName, setNewGiftName] = useState('');
@@ -499,12 +501,20 @@ function App() {
     setNewOccasionLocation('');
     setNewOccasionGoogleMapsUrl('');
     setNewOccasionDesc('');
+    setNewOccasionInvitedIds([]);
   };
 
   const closeOccasionModal = () => {
     setShowOccasionModal(false);
     setEditingOccasion(null);
     clearOccasionForm();
+  };
+
+  const openNewOccasionModal = () => {
+    setEditingOccasion(null);
+    clearOccasionForm();
+    setNewOccasionInvitedIds(Object.keys(profiles));
+    setShowOccasionModal(true);
   };
 
   const startEditOccasion = (occ: Occasion, e?: React.MouseEvent) => {
@@ -518,6 +528,7 @@ function App() {
     setNewOccasionLocation(occ.location || '');
     setNewOccasionGoogleMapsUrl(occ.google_maps_url || '');
     setNewOccasionDesc(occ.description || '');
+    setNewOccasionInvitedIds(occ.invited_user_ids || Object.keys(profiles));
     setShowOccasionModal(true);
   };
 
@@ -568,7 +579,8 @@ function App() {
           time: newOccasionTime || null,
           location: newOccasionLocation || null,
           google_maps_url: newOccasionGoogleMapsUrl || null,
-          description: newOccasionDesc
+          description: newOccasionDesc,
+          invited_user_ids: newOccasionInvitedIds
         })
         .eq('id', editingOccasion.id);
 
@@ -589,7 +601,8 @@ function App() {
             time: newOccasionTime || undefined,
             location: newOccasionLocation || undefined,
             google_maps_url: newOccasionGoogleMapsUrl || undefined,
-            description: newOccasionDesc || undefined
+            description: newOccasionDesc || undefined,
+            invited_user_ids: newOccasionInvitedIds
           });
         }
         setToast({ message: 'Okazja została zaktualizowana!', type: 'success' });
@@ -607,7 +620,8 @@ function App() {
           location: newOccasionLocation || null,
           google_maps_url: newOccasionGoogleMapsUrl || null,
           description: newOccasionDesc,
-          is_archived: false
+          is_archived: false,
+          invited_user_ids: newOccasionInvitedIds
         });
 
       if (error) {
@@ -1303,15 +1317,26 @@ function App() {
     };
   };
 
-  const upcomingOccasions = occasions.filter(occ => {
-    const { isPast, isArchived } = getOccasionCategory(occ);
-    return !isPast && !isArchived;
-  });
+  const isUserInvited = (occ: Occasion) => {
+    if (occ.creator_id === user.id) return true;
+    if (occ.owner_id === user.id) return true;
+    if (!occ.invited_user_ids) return true; // old events are public by default
+    return occ.invited_user_ids.includes(user.id);
+  };
 
-  const archivedOrPastOccasions = occasions.filter(occ => {
-    const { isPast, isArchived } = getOccasionCategory(occ);
-    return isPast || isArchived;
-  });
+  const upcomingOccasions = occasions
+    .filter(isUserInvited)
+    .filter(occ => {
+      const { isPast, isArchived } = getOccasionCategory(occ);
+      return !isPast && !isArchived;
+    });
+
+  const archivedOrPastOccasions = occasions
+    .filter(isUserInvited)
+    .filter(occ => {
+      const { isPast, isArchived } = getOccasionCategory(occ);
+      return isPast || isArchived;
+    });
 
   const filteredOccasions = dashboardTab === 'upcoming' ? upcomingOccasions : archivedOrPastOccasions;
 
@@ -1350,7 +1375,7 @@ function App() {
                   🎴 Kafle
                 </button>
               </div>
-              <button className="btn btn-primary" onClick={() => { setEditingOccasion(null); setShowOccasionModal(true); }}>
+              <button className="btn btn-primary" onClick={openNewOccasionModal}>
                 ➕ Nowe Wydarzenie
               </button>
             </div>
@@ -1390,7 +1415,7 @@ function App() {
                   : 'Tutaj pojawią się wydarzenia, które już się odbyły lub zostały zarchiwizowane.'}
               </p>
               {dashboardTab === 'upcoming' && (
-                <button className="btn btn-primary" onClick={() => setShowOccasionModal(true)}>
+                <button className="btn btn-primary" onClick={openNewOccasionModal}>
                   Dodaj pierwsze wydarzenie
                 </button>
               )}
@@ -1796,6 +1821,66 @@ function App() {
                   onChange={e => setNewOccasionGoogleMapsUrl(e.target.value)} 
                   placeholder="https://maps.google.com/..." 
                 />
+              </div>
+
+              <div className="form-group">
+                <label>Zaproszeni członkowie (kto ma widzieć wydarzenie) *</label>
+                <div style={{ 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  gap: '0.5rem', 
+                  background: 'rgba(0, 0, 0, 0.2)', 
+                  padding: '0.75rem', 
+                  borderRadius: '10px', 
+                  border: '1px solid var(--card-border)',
+                  maxHeight: '150px',
+                  overflowY: 'auto'
+                }}>
+                  {Object.values(profiles).map(p => {
+                    const isChecked = newOccasionInvitedIds.includes(p.id);
+                    return (
+                      <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <input 
+                          type="checkbox" 
+                          id={`invite-${p.id}`}
+                          checked={isChecked}
+                          onChange={e => {
+                            if (e.target.checked) {
+                              setNewOccasionInvitedIds([...newOccasionInvitedIds, p.id]);
+                            } else {
+                              setNewOccasionInvitedIds(newOccasionInvitedIds.filter(id => id !== p.id));
+                            }
+                          }}
+                          style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                        />
+                        <label 
+                          htmlFor={`invite-${p.id}`} 
+                          style={{ margin: 0, textTransform: 'none', fontSize: '0.9rem', color: 'white', cursor: 'pointer' }}
+                        >
+                          {p.display_name} {p.id === user.id && '(Ty)'}
+                        </label>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.35rem' }}>
+                  <button 
+                    type="button" 
+                    className="btn btn-secondary" 
+                    style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                    onClick={() => setNewOccasionInvitedIds(Object.keys(profiles))}
+                  >
+                    Zaznacz wszystkich
+                  </button>
+                  <button 
+                    type="button" 
+                    className="btn btn-secondary" 
+                    style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                    onClick={() => setNewOccasionInvitedIds([])}
+                  >
+                    Odznacz wszystkich
+                  </button>
+                </div>
               </div>
 
               <div className="form-group">
