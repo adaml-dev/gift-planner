@@ -101,6 +101,17 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{
+    show: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void | Promise<void>;
+  }>({
+    show: false,
+    title: '',
+    message: '',
+    onConfirm: () => {}
+  });
 
   // Silent & admin login states
   const [selectedProfile, setSelectedProfile] = useState<Profile | null>(null);
@@ -423,23 +434,28 @@ function App() {
     setLoading(false);
   };
 
-  const handleDeleteOccasion = async (id: string, e: React.MouseEvent) => {
+  const handleDeleteOccasion = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm('Czy na pewno chcesz usunąć to wydarzenie? Wszystkie powiązane prezenty zostaną trwale usunięte.')) return;
-    
-    setLoading(true);
-    const { error } = await supabase
-      .from('gp_occasions')
-      .delete()
-      .eq('id', id);
+    setConfirmModal({
+      show: true,
+      title: 'Usuń wydarzenie',
+      message: 'Czy na pewno chcesz usunąć to wydarzenie? Wszystkie powiązane prezenty zostaną trwale usunięte.',
+      onConfirm: async () => {
+        setLoading(true);
+        const { error } = await supabase
+          .from('gp_occasions')
+          .delete()
+          .eq('id', id);
 
-    if (error) {
-      setToast({ message: 'Błąd podczas usuwania: ' + error.message, type: 'error' });
-    } else {
-      fetchOccasions();
-      setToast({ message: 'Okazja została usunięta.', type: 'success' });
-    }
-    setLoading(false);
+        if (error) {
+          setToast({ message: 'Błąd podczas usuwania: ' + error.message, type: 'error' });
+        } else {
+          fetchOccasions();
+          setToast({ message: 'Okazja została usunięta.', type: 'success' });
+        }
+        setLoading(false);
+      }
+    });
   };
 
   // Add Gift logic
@@ -485,22 +501,27 @@ function App() {
     setLoading(false);
   };
 
-  const handleDeleteGift = async (giftId: string) => {
-    if (!confirm('Czy chcesz usunąć ten prezent z listy?')) return;
-    
-    setLoading(true);
-    const { error } = await supabase
-      .from('gp_gifts')
-      .delete()
-      .eq('id', giftId);
+  const handleDeleteGift = (giftId: string) => {
+    setConfirmModal({
+      show: true,
+      title: 'Usuń prezent',
+      message: 'Czy chcesz usunąć ten prezent z listy?',
+      onConfirm: async () => {
+        setLoading(true);
+        const { error } = await supabase
+          .from('gp_gifts')
+          .delete()
+          .eq('id', giftId);
 
-    if (error) {
-      setToast({ message: 'Błąd podczas usuwania: ' + error.message, type: 'error' });
-    } else if (activeOccasion) {
-      fetchGifts(activeOccasion.id);
-      setToast({ message: 'Prezent został usunięty.', type: 'success' });
-    }
-    setLoading(false);
+        if (error) {
+          setToast({ message: 'Błąd podczas usuwania: ' + error.message, type: 'error' });
+        } else if (activeOccasion) {
+          fetchGifts(activeOccasion.id);
+          setToast({ message: 'Prezent został usunięty.', type: 'success' });
+        }
+        setLoading(false);
+      }
+    });
   };
 
   // Booking logic
@@ -1396,6 +1417,41 @@ function App() {
           </div>
         </div>
       )}
+      {/* ----------------- CONFIRMATION MODAL ----------------- */}
+      {confirmModal.show && (
+        <div className="modal-overlay" style={{ zIndex: 2000 }}>
+          <div className="glass-panel modal-content" style={{ maxWidth: '400px', textAlign: 'center' }}>
+            <div className="modal-header" style={{ justifyContent: 'center', marginBottom: '1rem' }}>
+              <h2 style={{ margin: 0, color: 'var(--accent-red)' }}>⚠️ {confirmModal.title}</h2>
+            </div>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem', fontSize: '1rem', lineHeight: '1.5' }}>
+              {confirmModal.message}
+            </p>
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <button 
+                type="button" 
+                className="btn btn-secondary" 
+                style={{ flex: 1 }} 
+                onClick={() => setConfirmModal({ ...confirmModal, show: false })}
+              >
+                Anuluj
+              </button>
+              <button 
+                type="button" 
+                className="btn btn-danger" 
+                style={{ flex: 1 }} 
+                onClick={async () => {
+                  setConfirmModal(prev => ({ ...prev, show: false }));
+                  await confirmModal.onConfirm();
+                }}
+              >
+                Potwierdź
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {toast && (
         <div className="toast-container">
           <div className={`toast toast-${toast.type}`}>
