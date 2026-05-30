@@ -34,6 +34,7 @@ interface Occasion {
   google_maps_url?: string;
   description?: string;
   created_at: string;
+  is_archived?: boolean;
 }
 
 interface Gift {
@@ -93,6 +94,8 @@ function App() {
 
   // Modals / Form states
   const [showOccasionModal, setShowOccasionModal] = useState(false);
+  const [editingOccasion, setEditingOccasion] = useState<Occasion | null>(null);
+  const [dashboardTab, setDashboardTab] = useState<'upcoming' | 'archived'>('upcoming');
   const [newOccasionTitle, setNewOccasionTitle] = useState('');
   const [newOccasionOwnerName, setNewOccasionOwnerName] = useState('');
   const [newOccasionOwnerId, setNewOccasionOwnerId] = useState('');
@@ -486,8 +489,67 @@ function App() {
     await supabase.auth.signOut();
   };
 
-  // Add Occasion logic
-  const handleCreateOccasion = async (e: React.FormEvent) => {
+  // Occasion Form Cleanups & Helpers
+  const clearOccasionForm = () => {
+    setNewOccasionTitle('');
+    setNewOccasionOwnerName('');
+    setNewOccasionOwnerId('');
+    setNewOccasionDate('');
+    setNewOccasionTime('');
+    setNewOccasionLocation('');
+    setNewOccasionGoogleMapsUrl('');
+    setNewOccasionDesc('');
+  };
+
+  const closeOccasionModal = () => {
+    setShowOccasionModal(false);
+    setEditingOccasion(null);
+    clearOccasionForm();
+  };
+
+  const startEditOccasion = (occ: Occasion, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setEditingOccasion(occ);
+    setNewOccasionTitle(occ.title);
+    setNewOccasionOwnerName(occ.owner_name);
+    setNewOccasionOwnerId(occ.owner_id || '');
+    setNewOccasionDate(occ.date);
+    setNewOccasionTime(occ.time || '');
+    setNewOccasionLocation(occ.location || '');
+    setNewOccasionGoogleMapsUrl(occ.google_maps_url || '');
+    setNewOccasionDesc(occ.description || '');
+    setShowOccasionModal(true);
+  };
+
+  const handleToggleArchiveOccasion = async (occ: Occasion, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const newArchivedState = !occ.is_archived;
+    setLoading(true);
+    const { error } = await supabase
+      .from('gp_occasions')
+      .update({ is_archived: newArchivedState })
+      .eq('id', occ.id);
+
+    if (error) {
+      setToast({ message: 'Nie udało się zmienić statusu archiwizacji: ' + error.message, type: 'error' });
+    } else {
+      fetchOccasions();
+      setToast({ 
+        message: newArchivedState ? 'Wydarzenie zostało zarchiwizowane!' : 'Wydarzenie zostało przywrócone z archiwum!', 
+        type: 'success' 
+      });
+      if (activeOccasionDetails && activeOccasionDetails.id === occ.id) {
+        setActiveOccasionDetails({ ...activeOccasionDetails, is_archived: newArchivedState });
+      }
+      if (activeOccasion && activeOccasion.id === occ.id) {
+        setActiveOccasion({ ...activeOccasion, is_archived: newArchivedState });
+      }
+    }
+    setLoading(false);
+  };
+
+  // Add / Edit Occasion logic
+  const handleSaveOccasion = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newOccasionTitle.trim() || !newOccasionOwnerName.trim() || !newOccasionDate) {
       setToast({ message: 'Wypełnij wymagane pola!', type: 'error' });
@@ -495,34 +557,67 @@ function App() {
     }
 
     setLoading(true);
-    const { error } = await supabase
-      .from('gp_occasions')
-      .insert({
-        title: newOccasionTitle,
-        owner_name: newOccasionOwnerName,
-        owner_id: newOccasionOwnerId || null,
-        creator_id: user.id,
-        date: newOccasionDate,
-        time: newOccasionTime || null,
-        location: newOccasionLocation || null,
-        google_maps_url: newOccasionGoogleMapsUrl || null,
-        description: newOccasionDesc
-      });
+    if (editingOccasion) {
+      const { error } = await supabase
+        .from('gp_occasions')
+        .update({
+          title: newOccasionTitle,
+          owner_name: newOccasionOwnerName,
+          owner_id: newOccasionOwnerId || null,
+          date: newOccasionDate,
+          time: newOccasionTime || null,
+          location: newOccasionLocation || null,
+          google_maps_url: newOccasionGoogleMapsUrl || null,
+          description: newOccasionDesc
+        })
+        .eq('id', editingOccasion.id);
 
-    if (error) {
-      setToast({ message: 'Nie udało się utworzyć okazji: ' + error.message, type: 'error' });
+      if (error) {
+        setToast({ message: 'Nie udało się zaktualizować okazji: ' + error.message, type: 'error' });
+      } else {
+        setShowOccasionModal(false);
+        setEditingOccasion(null);
+        clearOccasionForm();
+        fetchOccasions();
+        if (activeOccasion && activeOccasion.id === editingOccasion.id) {
+          setActiveOccasion({
+            ...activeOccasion,
+            title: newOccasionTitle,
+            owner_name: newOccasionOwnerName,
+            owner_id: newOccasionOwnerId || undefined,
+            date: newOccasionDate,
+            time: newOccasionTime || undefined,
+            location: newOccasionLocation || undefined,
+            google_maps_url: newOccasionGoogleMapsUrl || undefined,
+            description: newOccasionDesc || undefined
+          });
+        }
+        setToast({ message: 'Okazja została zaktualizowana!', type: 'success' });
+      }
     } else {
-      setShowOccasionModal(false);
-      setNewOccasionTitle('');
-      setNewOccasionOwnerName('');
-      setNewOccasionOwnerId('');
-      setNewOccasionDate('');
-      setNewOccasionTime('');
-      setNewOccasionLocation('');
-      setNewOccasionGoogleMapsUrl('');
-      setNewOccasionDesc('');
-      fetchOccasions();
-      setToast({ message: 'Okazja została zaplanowana!', type: 'success' });
+      const { error } = await supabase
+        .from('gp_occasions')
+        .insert({
+          title: newOccasionTitle,
+          owner_name: newOccasionOwnerName,
+          owner_id: newOccasionOwnerId || null,
+          creator_id: user.id,
+          date: newOccasionDate,
+          time: newOccasionTime || null,
+          location: newOccasionLocation || null,
+          google_maps_url: newOccasionGoogleMapsUrl || null,
+          description: newOccasionDesc,
+          is_archived: false
+        });
+
+      if (error) {
+        setToast({ message: 'Nie udało się utworzyć okazji: ' + error.message, type: 'error' });
+      } else {
+        setShowOccasionModal(false);
+        clearOccasionForm();
+        fetchOccasions();
+        setToast({ message: 'Okazja została zaplanowana!', type: 'success' });
+      }
     }
     setLoading(false);
   };
@@ -544,6 +639,8 @@ function App() {
           setToast({ message: 'Błąd podczas usuwania: ' + error.message, type: 'error' });
         } else {
           fetchOccasions();
+          setView('dashboard');
+          setActiveOccasion(null);
           setToast({ message: 'Okazja została usunięta.', type: 'success' });
         }
         setLoading(false);
@@ -1194,6 +1291,30 @@ function App() {
     );
   };
 
+  const getOccasionCategory = (occ: Occasion) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const target = new Date(occ.date);
+    target.setHours(0, 0, 0, 0);
+    const isPast = target.getTime() < today.getTime();
+    return {
+      isPast,
+      isArchived: !!occ.is_archived
+    };
+  };
+
+  const upcomingOccasions = occasions.filter(occ => {
+    const { isPast, isArchived } = getOccasionCategory(occ);
+    return !isPast && !isArchived;
+  });
+
+  const archivedOrPastOccasions = occasions.filter(occ => {
+    const { isPast, isArchived } = getOccasionCategory(occ);
+    return isPast || isArchived;
+  });
+
+  const filteredOccasions = dashboardTab === 'upcoming' ? upcomingOccasions : archivedOrPastOccasions;
+
   return (
     <>
       {renderNav()}
@@ -1229,24 +1350,50 @@ function App() {
                   🎴 Kafle
                 </button>
               </div>
-              <button className="btn btn-primary" onClick={() => setShowOccasionModal(true)}>
+              <button className="btn btn-primary" onClick={() => { setEditingOccasion(null); setShowOccasionModal(true); }}>
                 ➕ Nowe Wydarzenie
               </button>
             </div>
+          </div>
+
+          {/* Dashboard Tabs */}
+          <div className="tab-nav" style={{ marginBottom: '1.5rem' }}>
+            <button 
+              className={`tab-btn ${dashboardTab === 'upcoming' ? 'active' : ''}`} 
+              onClick={() => setDashboardTab('upcoming')}
+            >
+              📅 Nadchodzące ({upcomingOccasions.length})
+            </button>
+            <button 
+              className={`tab-btn ${dashboardTab === 'archived' ? 'active' : ''}`} 
+              onClick={() => setDashboardTab('archived')}
+            >
+              🗄️ Archiwum i minione ({archivedOrPastOccasions.length})
+            </button>
           </div>
 
           {errorMsg && <div className="alert alert-danger">{errorMsg}</div>}
 
           {loading && <div style={{ textAlign: 'center', padding: '2rem' }}>Ładowanie wydarzeń...</div>}
 
-          {!loading && occasions.length === 0 && (
+          {!loading && filteredOccasions.length === 0 && (
             <div className="glass-panel empty-state">
-              <div className="empty-state-icon">🎂</div>
-              <h3>Brak zaplanowanych okazji</h3>
-              <p style={{ marginBottom: '1.5rem' }}>Dodaj urodziny, rocznicę lub inną okazję, by bliscy wiedzieli jakich prezentów szukać!</p>
-              <button className="btn btn-primary" onClick={() => setShowOccasionModal(true)}>
-                Dodaj pierwsze wydarzenie
-              </button>
+              <div className="empty-state-icon">
+                {dashboardTab === 'upcoming' ? '🎂' : '🗄️'}
+              </div>
+              <h3>
+                {dashboardTab === 'upcoming' ? 'Brak zaplanowanych okazji' : 'Brak minionych lub zarchiwizowanych wydarzeń'}
+              </h3>
+              <p style={{ marginBottom: '1.5rem' }}>
+                {dashboardTab === 'upcoming' 
+                  ? 'Dodaj urodziny, rocznicę lub inną okazję, by bliscy wiedzieli jakich prezentów szukać!'
+                  : 'Tutaj pojawią się wydarzenia, które już się odbyły lub zostały zarchiwizowane.'}
+              </p>
+              {dashboardTab === 'upcoming' && (
+                <button className="btn btn-primary" onClick={() => setShowOccasionModal(true)}>
+                  Dodaj pierwsze wydarzenie
+                </button>
+              )}
             </div>
           )}
 
@@ -1264,12 +1411,25 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {occasions.map(occ => {
+                  {filteredOccasions.map(occ => {
                     return (
                       <tr key={occ.id}>
                         <td data-label="Okazja" style={{ fontWeight: 500 }}>{occ.title}</td>
                         <td data-label="Data" style={{ whiteSpace: 'nowrap' }}>
                           📅 {formatDate(occ.date)} {occ.time && `o ${occ.time}`}
+                          {occ.is_archived && (
+                            <span 
+                              className="badge badge-info" 
+                              style={{ 
+                                marginLeft: '0.5rem', 
+                                background: 'rgba(255, 255, 255, 0.08)', 
+                                color: 'var(--text-secondary)', 
+                                border: '1px solid rgba(255, 255, 255, 0.1)' 
+                              }}
+                            >
+                              Zarchiwizowane
+                            </span>
+                          )}
                         </td>
                         <td data-label="Szczegóły" style={{ textAlign: 'right' }}>
                           <button 
@@ -1288,14 +1448,19 @@ function App() {
             </div>
           ) : (
             <div className="occasions-grid">
-              {occasions.map(occ => {
+              {filteredOccasions.map(occ => {
                 const daysLeft = getDaysLeft(occ.date);
                 const isCreator = occ.creator_id === user.id;
                 const isOwner = occ.owner_id === user.id;
 
                 return (
                   <div key={occ.id} className="glass-panel occasion-card" onClick={() => selectOccasion(occ)}>
-                    <div className="occasion-badge">{daysLeft}</div>
+                    <div 
+                      className="occasion-badge" 
+                      style={occ.is_archived ? { background: 'rgba(255, 255, 255, 0.1)', color: 'var(--text-secondary)' } : undefined}
+                    >
+                      {occ.is_archived ? '🗄️ Zarchiwizowane' : daysLeft}
+                    </div>
                     <h3>{occ.title}</h3>
                     <div className="occasion-meta">
                       📅 {formatDate(occ.date)} {occ.time && `o ${occ.time}`}
@@ -1317,9 +1482,32 @@ function App() {
                         Stworzył: {profiles[occ.creator_id]?.display_name || 'Ktoś'}
                       </div>
                       {isCreator && (
-                        <button className="btn btn-danger btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={(e) => handleDeleteOccasion(occ.id, e)}>
-                          Usuń
-                        </button>
+                        <div style={{ display: 'flex', gap: '0.35rem' }} onClick={e => e.stopPropagation()}>
+                          <button 
+                            className="btn btn-secondary" 
+                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }} 
+                            onClick={() => startEditOccasion(occ)}
+                            title="Edytuj"
+                          >
+                            ✏️
+                          </button>
+                          <button 
+                            className="btn btn-secondary" 
+                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }} 
+                            onClick={() => handleToggleArchiveOccasion(occ)}
+                            title={occ.is_archived ? "Przywróć" : "Zarchiwizuj"}
+                          >
+                            🗄️
+                          </button>
+                          <button 
+                            className="btn btn-danger btn-secondary" 
+                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }} 
+                            onClick={(e) => handleDeleteOccasion(occ.id, e)}
+                            title="Usuń"
+                          >
+                            🗑️
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1336,6 +1524,25 @@ function App() {
           <button className="back-link" onClick={() => { setView('dashboard'); setActiveOccasion(null); }}>
             ← Powrót do pulpitu
           </button>
+
+          {activeOccasion.is_archived && (
+            <div className="alert alert-danger" style={{ marginBottom: '1.5rem' }}>
+              🗄️ To wydarzenie jest zarchiwizowane.
+            </div>
+          )}
+
+          {(() => {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const target = new Date(activeOccasion.date);
+            target.setHours(0, 0, 0, 0);
+            const isPast = target.getTime() < today.getTime();
+            return isPast && !activeOccasion.is_archived;
+          })() && (
+            <div className="alert alert-success" style={{ marginBottom: '1.5rem', background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)', borderColor: 'rgba(255,255,255,0.08)' }}>
+              📅 To wydarzenie już się odbyło.
+            </div>
+          )}
 
           <div className="glass-panel occasion-details-header">
             <div className="occasion-title-row">
@@ -1394,6 +1601,19 @@ function App() {
                     🎴 Kafle
                   </button>
                 </div>
+                {activeOccasion.creator_id === user.id && (
+                  <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    <button className="btn btn-secondary" style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem' }} onClick={() => startEditOccasion(activeOccasion)}>
+                      ✏️ Edytuj
+                    </button>
+                    <button className="btn btn-secondary" style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem' }} onClick={() => handleToggleArchiveOccasion(activeOccasion)}>
+                      {activeOccasion.is_archived ? '🗄️ Przywróć' : '🗄️ Zarchiwizuj'}
+                    </button>
+                    <button className="btn btn-danger btn-secondary" style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem' }} onClick={(e) => handleDeleteOccasion(activeOccasion.id, e)}>
+                      🗑️ Usuń
+                    </button>
+                  </div>
+                )}
                 <button className="btn btn-primary" onClick={openGiftModal}>
                   🎁 Dodaj Prezent
                 </button>
@@ -1488,11 +1708,11 @@ function App() {
         <div className="modal-overlay">
           <div className="glass-panel modal-content">
             <div className="modal-header">
-              <h2>Dodaj nowe wydarzenie</h2>
-              <button className="close-btn" onClick={() => setShowOccasionModal(false)}>×</button>
+              <h2>{editingOccasion ? 'Edytuj wydarzenie' : 'Dodaj nowe wydarzenie'}</h2>
+              <button className="close-btn" onClick={closeOccasionModal}>×</button>
             </div>
             
-            <form onSubmit={handleCreateOccasion}>
+            <form onSubmit={handleSaveOccasion}>
               <div className="form-group">
                 <label>Nazwa Okazji *</label>
                 <input 
@@ -1590,7 +1810,7 @@ function App() {
               </div>
 
               <div className="modal-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowOccasionModal(false)}>
+                <button type="button" className="btn btn-secondary" onClick={closeOccasionModal}>
                   Anuluj
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={loading}>
@@ -1967,16 +2187,37 @@ function App() {
                 Wejdź do środka
               </button>
               {activeOccasionDetails.creator_id === user?.id && (
-                <button 
-                  type="button" 
-                  className="btn btn-danger btn-secondary" 
-                  onClick={(e) => {
-                    handleDeleteOccasion(activeOccasionDetails.id, e);
-                    setActiveOccasionDetails(null);
-                  }}
-                >
-                  Usuń
-                </button>
+                <>
+                  <button 
+                    type="button" 
+                    className="btn btn-secondary" 
+                    onClick={() => {
+                      startEditOccasion(activeOccasionDetails);
+                      setActiveOccasionDetails(null);
+                    }}
+                  >
+                    ✏️ Edytuj
+                  </button>
+                  <button 
+                    type="button" 
+                    className="btn btn-secondary" 
+                    onClick={() => {
+                      handleToggleArchiveOccasion(activeOccasionDetails);
+                    }}
+                  >
+                    {activeOccasionDetails.is_archived ? '🗄️ Przywróć' : '🗄️ Zarchiwizuj'}
+                  </button>
+                  <button 
+                    type="button" 
+                    className="btn btn-danger btn-secondary" 
+                    onClick={(e) => {
+                      handleDeleteOccasion(activeOccasionDetails.id, e);
+                      setActiveOccasionDetails(null);
+                    }}
+                  >
+                    Usuń
+                  </button>
+                </>
               )}
             </div>
           </div>
