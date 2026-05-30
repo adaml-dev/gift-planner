@@ -40,6 +40,7 @@ interface Booking {
   gift_id: string;
   user_id: string;
   created_at: string;
+  is_group?: boolean;
 }
 
 interface Vote {
@@ -491,16 +492,16 @@ function App() {
   };
 
   // Booking logic
-  const handleBook = async (giftId: string) => {
+  const handleBook = async (giftId: string, isGroup: boolean = false) => {
     const { error } = await supabase
       .from('gp_bookings')
-      .insert({ gift_id: giftId, user_id: user.id });
+      .insert({ gift_id: giftId, user_id: user.id, is_group: isGroup });
 
     if (error) {
       setToast({ message: 'Błąd rezerwacji: ' + error.message, type: 'error' });
     } else if (activeOccasion) {
       fetchBookings(activeOccasion.id);
-      setToast({ message: 'Zarezerwowano prezent!', type: 'success' });
+      setToast({ message: isGroup ? 'Dołączono do składki grupowej!' : 'Zarezerwowano prezent!', type: 'success' });
     }
   };
 
@@ -588,8 +589,134 @@ function App() {
   
   const sortedGoscieGifts = [...goscieGifts].sort((a, b) => getVoteCount(b.id) - getVoteCount(a.id));
 
-  // Check booking helper
-  const getBooking = (giftId: string) => bookings.find(b => b.gift_id === giftId);
+  // Helper to render a gift card (used in both tabs to prevent duplication and syntax bugs)
+  const renderGiftCard = (gift: Gift, isGuestTab: boolean) => {
+    const giftBookings = bookings.filter(b => b.gift_id === gift.id);
+    const isBooked = giftBookings.length > 0;
+    const isGroup = isBooked && giftBookings[0].is_group;
+    const isBookedByMe = giftBookings.some(b => b.user_id === user?.id);
+    const isGiftCreator = gift.suggested_by === user?.id;
+
+    const votesCount = getVoteCount(gift.id);
+    const userVoted = hasUserVoted(gift.id);
+
+    return (
+      <div key={gift.id} className="glass-panel gift-card" style={{ position: 'relative' }}>
+        {isGuestTab ? (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', paddingRight: (isGiftCreator || activeOccasion?.creator_id === user?.id) ? '40px' : '0' }}>
+            <h3 style={{ margin: 0 }}>{gift.name}</h3>
+            <div className="vote-section" style={{ flexShrink: 0 }}>
+              <button 
+                className={`btn ${userVoted ? 'btn-primary' : 'btn-secondary'}`} 
+                style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
+                onClick={() => userVoted ? handleUnvote(gift.id) : handleVote(gift.id)}
+              >
+                👍 {votesCount}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <h3>{gift.name}</h3>
+        )}
+
+        {gift.description && <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>{gift.description}</p>}
+        
+        {gift.price && <div className="gift-price">{gift.price} zł</div>}
+        
+        <div className="gift-meta">
+          {gift.urls && gift.urls.length > 0 ? (
+            <div className="gift-links-list">
+              {gift.urls.map((link, idx) => (
+                <a key={idx} href={link.url} target="_blank" rel="noopener noreferrer" className="gift-link-tag">
+                  🔗 {link.label}
+                </a>
+              ))}
+            </div>
+          ) : (
+            gift.url && (
+              <a href={gift.url} target="_blank" rel="noopener noreferrer" className="btn-link" style={{ alignSelf: 'flex-start', marginBottom: '0.5rem' }}>
+                🔗 Zobacz w sklepie
+              </a>
+            )
+          )}
+          <span>Zaproponowany przez: {profiles[gift.suggested_by || '']?.display_name || 'Solenizant'}</span>
+        </div>
+
+        {/* Bookings section (hidden from occasion owner) */}
+        {!isOwnerActiveOccasion && (
+          <div style={{ marginTop: 'auto', paddingTop: '1rem' }}>
+            {isBooked ? (
+              isGroup ? (
+                <>
+                  <div className="gift-status-badge booked" style={{ background: 'rgba(170, 59, 255, 0.1)', color: 'var(--primary)' }}>
+                    👥 Składka: {giftBookings.map(b => profiles[b.user_id]?.display_name || 'Znajomy').join(', ')}
+                  </div>
+                  <div className="gift-actions">
+                    {isBookedByMe ? (
+                      <button className="btn btn-secondary" onClick={() => handleUnbook(gift.id)}>
+                        Opuść składkę
+                      </button>
+                    ) : (
+                      <button className="btn btn-primary" onClick={() => handleBook(gift.id, true)}>
+                        Dołącz do składki
+                      </button>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="gift-status-badge booked">
+                    🔒 Kupuje: {isBookedByMe ? 'Ty' : (profiles[giftBookings[0].user_id]?.display_name || 'znajomego')}
+                  </div>
+                  <div className="gift-actions">
+                    {isBookedByMe ? (
+                      <button className="btn btn-secondary" onClick={() => handleUnbook(gift.id)}>
+                        Anuluj rezerwację
+                      </button>
+                    ) : (
+                      <button className="btn btn-secondary" disabled style={{ opacity: 0.5 }}>
+                        Zajęty
+                      </button>
+                    )}
+                  </div>
+                </>
+              )
+            ) : (
+              <>
+                <div className="gift-status-badge available">🟢 Dostępny</div>
+                <div className="gift-actions" style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button className="btn btn-primary" style={{ padding: '0.5rem 0.75rem', fontSize: '0.85rem', flex: 1 }} onClick={() => handleBook(gift.id, false)}>
+                    Kupuję sam
+                  </button>
+                  <button className="btn btn-secondary" style={{ padding: '0.5rem 0.75rem', fontSize: '0.85rem', flex: 1 }} onClick={() => handleBook(gift.id, true)}>
+                    Składka grupowa
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Show delete button if user added this gift or is occasion creator */}
+        {(isGiftCreator || activeOccasion?.creator_id === user?.id) && (
+          <button 
+            className="btn btn-danger btn-secondary" 
+            style={{ 
+              position: 'absolute', 
+              top: '10px', 
+              right: isGuestTab ? '55px' : '10px', 
+              padding: '0.3rem 0.6rem', 
+              fontSize: '0.75rem',
+              zIndex: 10
+            }}
+            onClick={() => handleDeleteGift(gift.id)}
+          >
+            Usuń
+          </button>
+        )}
+      </div>
+    );
+  };
 
   // 1. PIN Unlock screen
   if (!unlocked) {
@@ -871,84 +998,7 @@ function App() {
                     </div>
                   ) : (
                     <div className="gifts-grid">
-                      {solenizantGifts.map(gift => {
-                        const booking = getBooking(gift.id);
-                        const isBooked = !!booking;
-                        const isBookedByMe = booking?.user_id === user.id;
-                        const isGiftCreator = gift.suggested_by === user.id;
-                        
-                        return (
-                          <div key={gift.id} className="glass-panel gift-card">
-                            <h3>{gift.name}</h3>
-                            {gift.description && <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>{gift.description}</p>}
-                            
-                            {gift.price && <div className="gift-price">{gift.price} zł</div>}
-                            
-                            <div className="gift-meta">
-                              {gift.urls && gift.urls.length > 0 ? (
-                                <div className="gift-links-list">
-                                  {gift.urls.map((link, idx) => (
-                                    <a key={idx} href={link.url} target="_blank" rel="noopener noreferrer" className="gift-link-tag">
-                                      🔗 {link.label}
-                                    </a>
-                                  ))}
-                                </div>
-                              ) : (
-                                gift.url && (
-                                  <a href={gift.url} target="_blank" rel="noopener noreferrer" className="btn-link" style={{ alignSelf: 'flex-start', marginBottom: '0.5rem' }}>
-                                    🔗 Zobacz w sklepie
-                                  </a>
-                                )
-                              )}
-                              <span>Zaproponowany przez: {profiles[gift.suggested_by || '']?.display_name || 'Solenizant'}</span>
-                            </div>
-
-                            {/* Bookings section (hidden from occasion owner) */}
-                            {!isOwnerActiveOccasion && (
-                              <div style={{ marginTop: 'auto' }}>
-                                {isBooked ? (
-                                  <>
-                                    <div className="gift-status-badge booked">
-                                      🔒 Zarezerwowany przez {isBookedByMe ? 'Ciebie' : (profiles[booking.user_id]?.display_name || 'znajomego')}
-                                    </div>
-                                    <div className="gift-actions">
-                                      {isBookedByMe ? (
-                                        <button className="btn btn-secondary" onClick={() => handleUnbook(gift.id)}>
-                                          Anuluj rezerwację
-                                        </button>
-                                      ) : (
-                                        <button className="btn btn-secondary" disabled style={{ opacity: 0.5 }}>
-                                          Zajęty
-                                        </button>
-                                      )}
-                                    </div>
-                                  </>
-                                ) : (
-                                  <>
-                                    <div className="gift-status-badge available">🟢 Dostępny</div>
-                                    <div className="gift-actions">
-                                      <button className="btn btn-primary" onClick={() => handleBook(gift.id)}>
-                                        Zarezerwuj
-                                      </button>
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                            )}
-
-                            {/* Show delete button if user added this gift or is occasion creator */}
-                            {(isGiftCreator || activeOccasion.creator_id === user.id) && (
-                              <button 
-                                className="btn btn-danger btn-secondary" 
-                                style={{ position: 'absolute', top: '10px', right: '10px', padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}
-                                onClick={() => handleDeleteGift(gift.id)}
-                              >
-                                Usuń
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
+                      {solenizantGifts.map(gift => renderGiftCard(gift, false))}
                     </div>
                   )}
                 </div>
@@ -972,94 +1022,7 @@ function App() {
                     </div>
                   ) : (
                     <div className="gifts-grid">
-                      {sortedGoscieGifts.map(gift => {
-                        const booking = getBooking(gift.id);
-                        const isBooked = !!booking;
-                        const isBookedByMe = booking?.user_id === user.id;
-                        const isGiftCreator = gift.suggested_by === user.id;
-                        const votesCount = getVoteCount(gift.id);
-                        const userVoted = hasUserVoted(gift.id);
-
-                        return (
-                          <div key={gift.id} className="glass-panel gift-card">
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                              <h3>{gift.name}</h3>
-                              {/* Voting Section */}
-                              <div className="vote-section">
-                                <button 
-                                  className={`btn ${userVoted ? 'btn-primary' : 'btn-secondary'}`} 
-                                  style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                                  onClick={() => userVoted ? handleUnvote(gift.id) : handleVote(gift.id)}
-                                >
-                                  👍 {votesCount}
-                                </button>
-                              </div>
-                            </div>
-                            
-                            {gift.description && <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>{gift.description}</p>}
-                            {gift.price && <div className="gift-price">{gift.price} zł</div>}
-
-                            <div className="gift-meta">
-                              {gift.urls && gift.urls.length > 0 ? (
-                                <div className="gift-links-list">
-                                  {gift.urls.map((link, idx) => (
-                                    <a key={idx} href={link.url} target="_blank" rel="noopener noreferrer" className="gift-link-tag">
-                                      🔗 {link.label}
-                                    </a>
-                                  ))}
-                                </div>
-                              ) : (
-                                gift.url && (
-                                  <a href={gift.url} target="_blank" rel="noopener noreferrer" className="btn-link" style={{ alignSelf: 'flex-start', marginBottom: '0.5rem' }}>
-                                    🔗 Zobacz w sklepie
-                                  </a>
-                                )
-                              )}
-                              <span>Zaproponowane przez: {profiles[gift.suggested_by || '']?.display_name || 'Znajomy'}</span>
-                            </div>
-
-                            <div style={{ marginTop: 'auto' }}>
-                              {isBooked ? (
-                                <>
-                                  <div className="gift-status-badge booked">
-                                    🔒 Kupuje: {isBookedByMe ? 'Ty' : (profiles[booking.user_id]?.display_name || 'znajomy')}
-                                  </div>
-                                  <div className="gift-actions">
-                                    {isBookedByMe ? (
-                                      <button className="btn btn-secondary" onClick={() => handleUnbook(gift.id)}>
-                                        Anuluj zakup
-                                      </button>
-                                    ) : (
-                                      <button className="btn btn-secondary" disabled style={{ opacity: 0.5 }}>
-                                        Kupuje ktoś inny
-                                      </button>
-                                    )}
-                                  </div>
-                                </>
-                              ) : (
-                                <>
-                                  <div className="gift-status-badge available">🟢 Wolny</div>
-                                  <div className="gift-actions">
-                                    <button className="btn btn-primary" onClick={() => handleBook(gift.id)}>
-                                      Zadeklaruj zakup
-                                    </button>
-                                  </div>
-                                </>
-                              )}
-                            </div>
-
-                            {(isGiftCreator || activeOccasion.creator_id === user.id) && (
-                              <button 
-                                className="btn btn-danger btn-secondary" 
-                                style={{ position: 'absolute', top: '10px', right: '55px', padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}
-                                onClick={() => handleDeleteGift(gift.id)}
-                              >
-                                Usuń
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
+                      {sortedGoscieGifts.map(gift => renderGiftCard(gift, true))}
                     </div>
                   )}
                 </div>
