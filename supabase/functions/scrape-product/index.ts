@@ -128,6 +128,8 @@ function extractFromHtml(html: string): Partial<{ name: string; description: str
     const pricePatterns = [
       /'price'\s*:\s*([\d]+[,.]?[\d]*)/,
       /"price"\s*:\s*"([\d]+[,.]?[\d]*)"/,
+      /"originalPrice"\s*:\s*"([\d]+[,.]?[\d]*)"/,
+      /"priceAmount"\s*:\s*"([\d]+[,.]?[\d]*)"/,
       /data-price=["']([\d]+[,.]?[\d]*)["']/,
     ];
     for (const p of pricePatterns) {
