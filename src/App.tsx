@@ -343,6 +343,7 @@ function App() {
   const selectOccasion = async (occ: Occasion) => {
     setActiveOccasion(occ);
     setView('occasion');
+    setActiveTab('solenizant');
     setLoading(true);
     await Promise.all([
       fetchGifts(occ.id),
@@ -1490,9 +1491,9 @@ function App() {
     return (
       <nav className="navbar">
         <div className="navbar-container">
-          <div className="navbar-brand" onClick={() => { setView('dashboard'); setActiveOccasion(null); }} style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', cursor: 'pointer' }}>
-            <span style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>🎁 Gift Planner</span>
-            <span style={{ fontSize: '0.65rem', fontWeight: 'normal', color: 'var(--text-secondary)', opacity: 0.7 }}>
+          <div onClick={() => { setView('dashboard'); setActiveOccasion(null); }} style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', cursor: 'pointer' }}>
+            <span className="navbar-brand" style={{ fontSize: '1.25rem', fontWeight: 'bold', display: 'block', margin: 0 }}>🎁 Gift Planner</span>
+            <span style={{ fontSize: '0.65rem', fontWeight: 'normal', color: 'var(--text-secondary)', opacity: 0.7, paddingLeft: '0.2rem' }}>
               v{versionInfo.version} ({versionInfo.date})
             </span>
           </div>
@@ -1502,8 +1503,10 @@ function App() {
                 👤 <span className="hide-mobile">Zarządzaj rodziną</span><span className="show-mobile-inline">Rodzina</span>
               </button>
             )}
-            <span style={{ fontSize: '0.95rem', color: 'var(--text-secondary)' }}>
-              Cześć, <strong>{userProfile?.display_name || user.email?.split('@')[0]}</strong>!
+            <span style={{ fontSize: '0.95rem', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: '0.2rem', flexShrink: 0 }}>
+              <span className="hide-mobile">Cześć, </span>
+              <strong>{userProfile?.display_name || user.email?.split('@')[0]}</strong>
+              <span className="hide-mobile">!</span>
             </span>
             <button 
               className={`btn ${view === 'my-bookings' ? 'btn-primary' : 'btn-secondary'}`} 
@@ -1542,7 +1545,8 @@ function App() {
               )}
             </button>
             <button className="btn btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }} onClick={handleLogout}>
-              Wyloguj
+              <span className="hide-mobile">Wyloguj</span>
+              <span className="show-mobile-inline">🚪</span>
             </button>
           </div>
         </div>

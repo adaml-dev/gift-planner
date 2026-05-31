@@ -627,16 +627,24 @@ h1 {
     padding: 0.4rem 0.6rem;
   }
 
+  .navbar-container {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
   .navbar-brand {
     font-size: 1.15rem;
   }
 
   .navbar-user {
+    width: 100%;
+    justify-content: space-between;
     gap: 0.4rem;
   }
 
   .navbar-user span {
-    display: none; /* Hide welcome text to save space on mobile */
+    font-size: 0.8rem;
   }
 
   /* Headings & Text */
