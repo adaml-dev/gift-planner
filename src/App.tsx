@@ -56,7 +56,8 @@ interface Gift {
 
 interface Booking {
   id: string;
-  gift_id: string;
+  gift_id?: string | null;
+  surprise_id?: string | null;
   user_id: string;
   created_at: string;
   is_group?: boolean;
@@ -66,7 +67,8 @@ interface Booking {
 
 interface Vote {
   id: string;
-  gift_id: string;
+  gift_id?: string | null;
+  surprise_id?: string | null;
   user_id: string;
   created_at: string;
 }
@@ -93,11 +95,13 @@ function App() {
   const [activeOccasion, setActiveOccasion] = useState<Occasion | null>(null);
   const [gifts, setGifts] = useState<Gift[]>([]);
   const [allGifts, setAllGifts] = useState<Gift[]>([]);
+  const [surprises, setSurprises] = useState<any[]>([]);
+  const [allSurprises, setAllSurprises] = useState<any[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [votes, setVotes] = useState<Vote[]>([]);
   
   // Tab control in Occasion view
-  const [activeTab, setActiveTab] = useState<'solenizant' | 'goscie'>('solenizant');
+  const [activeTab, setActiveTab] = useState<'solenizant' | 'goscie' | 'chat'>('solenizant');
 
   // Modals / Form states
   const [showOccasionModal, setShowOccasionModal] = useState(false);
@@ -127,9 +131,16 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const [bookingModal, setBookingModal] = useState<{ show: boolean; giftId: string; giftName: string } | null>(null);
+  const [bookingModal, setBookingModal] = useState<{ show: boolean; giftId: string; giftName: string; isSurprise?: boolean } | null>(null);
   const [activeOccasionDetails, setActiveOccasionDetails] = useState<Occasion | null>(null);
-  const [activeGiftDetails, setActiveGiftDetails] = useState<Gift | null>(null);
+  const [activeGiftDetails, setActiveGiftDetails] = useState<any | null>(null);
+  const [activeGiftIsSurprise, setActiveGiftIsSurprise] = useState<boolean>(false);
+
+  // Chat states
+  const [messages, setMessages] = useState<any[]>([]);
+  const [chatSearch, setChatSearch] = useState('');
+  const [newMessage, setNewMessage] = useState('');
+  const [newComment, setNewComment] = useState('');
   const [confirmModal, setConfirmModal] = useState<{
     show: boolean;
     title: string;
@@ -150,11 +161,16 @@ function App() {
   const [newMemberIsAdmin, setNewMemberIsAdmin] = useState(false);
   const [newMemberPassword, setNewMemberPassword] = useState('');
 
-  // Find bookings of the current user that are rejected (i.e. not approved, but someone else has an approved booking for the same gift)
+  // Find bookings of the current user that are rejected (i.e. not approved, but someone else has an approved booking for the same gift/surprise)
   const myRejectedBookings = user ? bookings.filter(b => {
     if (b.user_id !== user.id) return false;
     if (b.is_approved) return false;
-    return bookings.some(otherB => otherB.gift_id === b.gift_id && otherB.is_approved);
+    if (b.gift_id) {
+      return bookings.some(otherB => otherB.gift_id === b.gift_id && otherB.is_approved);
+    } else if (b.surprise_id) {
+      return bookings.some(otherB => otherB.surprise_id === b.surprise_id && otherB.is_approved);
+    }
+    return false;
   }) : [];
   const myRejectedBookingsCount = myRejectedBookings.length;
 
@@ -205,8 +221,97 @@ function App() {
       fetchOccasions();
       fetchBookings();
       fetchAllGifts();
+      fetchAllSurprises();
     }
   }, [user]);
+
+  // 1.5. Event chat messages realtime subscription & handlers
+  useEffect(() => {
+    if (!activeOccasion) return;
+
+    const channel = supabase
+      .channel(`gp_messages:${activeOccasion.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'gp_messages',
+          filter: `occasion_id=eq.${activeOccasion.id}`
+        },
+        () => {
+          fetchMessages(activeOccasion.id);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeOccasion]);
+
+  const formatMessageTime = (dateStr: string) => {
+    const d = new Date(dateStr);
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    const timeStr = d.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
+    if (isToday) {
+      return `dzisiaj, ${timeStr}`;
+    }
+    return `${d.toLocaleDateString('pl-PL', { day: 'numeric', month: 'short' })}, ${timeStr}`;
+  };
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMessage.trim() || !activeOccasion) return;
+
+    const msgText = newMessage.trim();
+    setNewMessage('');
+
+    const { error } = await supabase
+      .from('gp_messages')
+      .insert({
+        occasion_id: activeOccasion.id,
+        user_id: user.id,
+        message: msgText
+      });
+
+    if (error) {
+      setToast({ message: 'Nie udało się wysłać: ' + error.message, type: 'error' });
+    } else {
+      await fetchMessages(activeOccasion.id);
+    }
+  };
+
+  const handleSendComment = async (e: React.FormEvent, itemId: string, isSurprise: boolean = false) => {
+    e.preventDefault();
+    if (!newComment.trim() || !activeOccasion) return;
+
+    const commentText = newComment.trim();
+    setNewComment('');
+
+    const insertData: any = {
+      occasion_id: activeOccasion.id,
+      user_id: user.id,
+      message: commentText
+    };
+    if (isSurprise) {
+      insertData.surprise_id = itemId;
+    } else {
+      insertData.gift_id = itemId;
+    }
+
+    const { error } = await supabase
+      .from('gp_messages')
+      .insert(insertData);
+
+    if (error) {
+      setToast({ message: 'Nie udało się dodać komentarza: ' + error.message, type: 'error' });
+    } else {
+      await fetchMessages(activeOccasion.id);
+      setToast({ message: 'Komentarz został dodany!', type: 'success' });
+    }
+  };
 
   // 3. Realtime updates subscription
   useEffect(() => {
@@ -216,6 +321,9 @@ function App() {
       .channel(`gp-realtime-${activeOccasion.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'gp_gifts' }, () => {
         fetchGifts(activeOccasion.id);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'gp_surprises' }, () => {
+        fetchSurprises(activeOccasion.id);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'gp_bookings' }, () => {
         fetchBookings(activeOccasion.id);
@@ -291,6 +399,31 @@ function App() {
     setLoading(false);
   };
 
+  const fetchSurprises = async (occasionId: string) => {
+    const { data } = await supabase
+      .from('gp_surprises')
+      .select('*')
+      .eq('occasion_id', occasionId)
+      .order('created_at', { ascending: true });
+    setSurprises(data || []);
+  };
+
+  const fetchAllSurprises = async () => {
+    const { data } = await supabase
+      .from('gp_surprises')
+      .select('*');
+    setAllSurprises(data || []);
+  };
+
+  const fetchMessages = async (occasionId: string) => {
+    const { data } = await supabase
+      .from('gp_messages')
+      .select('*')
+      .eq('occasion_id', occasionId)
+      .order('created_at', { ascending: true });
+    setMessages(data || []);
+  };
+
   const fetchGifts = async (occasionId: string) => {
     const { data } = await supabase
       .from('gp_gifts')
@@ -312,7 +445,8 @@ function App() {
     await Promise.all([
       fetchBookings(),
       fetchOccasions(),
-      fetchAllGifts()
+      fetchAllGifts(),
+      fetchAllSurprises()
     ]);
     setLoading(false);
   };
@@ -347,8 +481,10 @@ function App() {
     setLoading(true);
     await Promise.all([
       fetchGifts(occ.id),
+      fetchSurprises(occ.id),
       fetchBookings(occ.id),
-      fetchVotes(occ.id)
+      fetchVotes(occ.id),
+      fetchMessages(occ.id)
     ]);
     setLoading(false);
   };
@@ -767,13 +903,14 @@ function App() {
     setShowGiftModal(true);
   };
 
-  // Add Gift logic
+  // Add Gift or Surprise logic
   const handleCreateGift = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newGiftName.trim() || !activeOccasion) return;
 
     setLoading(true);
-    const isSecretValue = activeOccasion.owner_id === user.id ? false : newGiftIsSecret;
+    // Use the checkbox value 'newGiftIsSecret' to determine if it is a surprise, provided the user is not the owner.
+    const isSurprise = (!isOwnerActiveOccasion && newGiftIsSecret);
 
     const filteredVariants = giftVariants
       .filter(v => v.url.trim() !== '')
@@ -782,21 +919,22 @@ function App() {
         url: v.url.trim()
       }));
 
+    const insertData: any = {
+      occasion_id: activeOccasion.id,
+      name: newGiftName,
+      description: newGiftDesc || null,
+      price: newGiftPrice ? parseFloat(newGiftPrice) : null,
+      url: filteredVariants[0]?.url || null,
+      urls: filteredVariants,
+      suggested_by: user.id
+    };
+
     const { error } = await supabase
-      .from('gp_gifts')
-      .insert({
-        occasion_id: activeOccasion.id,
-        name: newGiftName,
-        description: newGiftDesc || null,
-        price: newGiftPrice ? parseFloat(newGiftPrice) : null,
-        url: filteredVariants[0]?.url || null,
-        urls: filteredVariants,
-        suggested_by: user.id,
-        is_secret: isSecretValue
-      });
+      .from(isSurprise ? 'gp_surprises' : 'gp_gifts')
+      .insert(insertData);
 
     if (error) {
-      setToast({ message: 'Nie udało się dodać prezentu: ' + error.message, type: 'error' });
+      setToast({ message: 'Nie udało się dodać: ' + error.message, type: 'error' });
     } else {
       setShowGiftModal(false);
       setNewGiftName('');
@@ -804,30 +942,41 @@ function App() {
       setNewGiftPrice('');
       setGiftVariants([{ label: '', url: '' }]);
       setNewGiftIsSecret(false);
-      await fetchGifts(activeOccasion.id);
+      if (isSurprise) {
+        await fetchSurprises(activeOccasion.id);
+      } else {
+        await fetchGifts(activeOccasion.id);
+      }
       await fetchAllGifts();
-      setToast({ message: 'Prezent został dodany do listy.', type: 'success' });
+      await fetchAllSurprises();
+      setToast({ message: isSurprise ? 'Niespodzianka została dodana.' : 'Prezent został dodany do listy.', type: 'success' });
     }
     setLoading(false);
   };
 
-  const handleDeleteGift = (giftId: string) => {
+  const handleDeleteItem = (itemId: string, isSurprise: boolean = false) => {
     setConfirmModal({
       show: true,
-      title: 'Usuń prezent',
-      message: 'Czy chcesz usunąć ten prezent z listy?',
+      title: isSurprise ? 'Usuń niespodziankę' : 'Usuń prezent',
+      message: isSurprise ? 'Czy chcesz usunąć tę niespodziankę z listy?' : 'Czy chcesz usunąć ten prezent z listy?',
       onConfirm: async () => {
         setLoading(true);
         const { error } = await supabase
-          .from('gp_gifts')
+          .from(isSurprise ? 'gp_surprises' : 'gp_gifts')
           .delete()
-          .eq('id', giftId);
+          .eq('id', itemId);
 
         if (error) {
           setToast({ message: 'Błąd podczas usuwania: ' + error.message, type: 'error' });
         } else if (activeOccasion) {
-          fetchGifts(activeOccasion.id);
-          setToast({ message: 'Prezent został usunięty.', type: 'success' });
+          if (isSurprise) {
+            await fetchSurprises(activeOccasion.id);
+          } else {
+            await fetchGifts(activeOccasion.id);
+          }
+          await fetchAllGifts();
+          await fetchAllSurprises();
+          setToast({ message: isSurprise ? 'Niespodzianka została usunięta.' : 'Prezent został usunięty.', type: 'success' });
         }
         setLoading(false);
       }
@@ -835,15 +984,21 @@ function App() {
   };
 
   // Booking logic
-  const handleBook = async (giftId: string, isGroup: boolean = false, groupId: string | null = null) => {
+  const handleBook = async (itemId: string, isGroup: boolean = false, groupId: string | null = null, isSurprise: boolean = false) => {
+    const insertData: any = { 
+      user_id: user.id, 
+      is_group: isGroup,
+      group_id: groupId 
+    };
+    if (isSurprise) {
+      insertData.surprise_id = itemId;
+    } else {
+      insertData.gift_id = itemId;
+    }
+
     const { error } = await supabase
       .from('gp_bookings')
-      .insert({ 
-        gift_id: giftId, 
-        user_id: user.id, 
-        is_group: isGroup,
-        group_id: groupId 
-      });
+      .insert(insertData);
 
     if (error) {
       setToast({ message: 'Błąd rezerwacji: ' + error.message, type: 'error' });
@@ -853,11 +1008,11 @@ function App() {
     }
   };
 
-  const handleUnbook = async (giftId: string) => {
+  const handleUnbook = async (itemId: string, isSurprise: boolean = false) => {
     const { error } = await supabase
       .from('gp_bookings')
       .delete()
-      .eq('gift_id', giftId)
+      .eq(isSurprise ? 'surprise_id' : 'gift_id', itemId)
       .eq('user_id', user.id);
 
     if (error) {
@@ -871,10 +1026,17 @@ function App() {
   };
 
   // Voting logic
-  const handleVote = async (giftId: string) => {
+  const handleVote = async (itemId: string, isSurprise: boolean = false) => {
+    const insertData: any = { user_id: user.id };
+    if (isSurprise) {
+      insertData.surprise_id = itemId;
+    } else {
+      insertData.gift_id = itemId;
+    }
+
     const { error } = await supabase
       .from('gp_votes')
-      .insert({ gift_id: giftId, user_id: user.id });
+      .insert(insertData);
 
     if (error) {
       setToast({ message: 'Błąd głosowania: ' + error.message, type: 'error' });
@@ -884,11 +1046,11 @@ function App() {
     }
   };
 
-  const handleUnvote = async (giftId: string) => {
+  const handleUnvote = async (itemId: string, isSurprise: boolean = false) => {
     const { error } = await supabase
       .from('gp_votes')
       .delete()
-      .eq('gift_id', giftId)
+      .eq(isSurprise ? 'surprise_id' : 'gift_id', itemId)
       .eq('user_id', user.id);
 
     if (error) {
@@ -925,24 +1087,27 @@ function App() {
   
   // Solenizant tab includes:
   // - If current user is the owner, only gifts suggested/added by the owner.
-  // - Otherwise, all gifts that are not marked as secret (is_secret = false).
+  // - Otherwise, all gifts (which are in public.gp_gifts table).
   const solenizantGifts = gifts.filter(g => {
     if (isOwnerActiveOccasion) {
       return g.suggested_by === user?.id;
     }
-    return !g.is_secret;
+    return true;
   });
 
   // Guest tab (Pomysły gości) includes:
-  // - Gifts marked as secret (is_secret = true)
+  // - Surprises loaded from gp_surprises table
   // - These are only shown if current user is NOT the owner of this occasion
-  const goscieGifts = isOwnerActiveOccasion ? [] : gifts.filter(g => g.is_secret);
+  const goscieGifts = isOwnerActiveOccasion ? [] : surprises;
 
   // Sort goscieGifts by votes count
-  const getVoteCount = (giftId: string) => votes.filter(v => v.gift_id === giftId).length;
-  const hasUserVoted = (giftId: string) => votes.some(v => v.gift_id === giftId && v.user_id === user?.id);
+  const getVoteCount = (itemId: string, isSurprise: boolean = false) => 
+    votes.filter(v => isSurprise ? v.surprise_id === itemId : v.gift_id === itemId).length;
+
+  const hasUserVoted = (itemId: string, isSurprise: boolean = false) => 
+    votes.some(v => (isSurprise ? v.surprise_id === itemId : v.gift_id === itemId) && v.user_id === user?.id);
   
-  const sortedGoscieGifts = [...goscieGifts].sort((a, b) => getVoteCount(b.id) - getVoteCount(a.id));
+  const sortedGoscieGifts = [...goscieGifts].sort((a, b) => getVoteCount(b.id, true) - getVoteCount(a.id, true));
 
   const handleToggleApproveBooking = async (bookingId: string, approve: boolean) => {
     setLoading(true);
@@ -965,8 +1130,8 @@ function App() {
     setLoading(false);
   };
 
-  const renderGiftQueueAndActions = (gift: Gift) => {
-    const giftBookings = bookings.filter(b => b.gift_id === gift.id);
+  const renderGiftQueueAndActions = (item: any, isSurprise: boolean = false) => {
+    const giftBookings = bookings.filter(b => isSurprise ? b.surprise_id === item.id : b.gift_id === item.id);
     
     const myBooking = giftBookings.find(b => b.user_id === user?.id);
     const hasMyBooking = !!myBooking;
@@ -1090,7 +1255,7 @@ function App() {
                       <button 
                         className="btn btn-secondary" 
                         style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }} 
-                        onClick={() => handleUnbook(gift.id)}
+                        onClick={() => handleUnbook(item.id, isSurprise)}
                       >
                         {b.is_approved ? 'Anuluj zakup' : (b.is_group ? 'Opuść składkę' : 'Anuluj rezerwację')}
                       </button>
@@ -1123,7 +1288,7 @@ function App() {
               <button 
                 className="btn btn-primary" 
                 style={{ padding: '0.5rem 1rem', fontSize: '0.85rem', width: '100%' }} 
-                onClick={() => setBookingModal({ show: true, giftId: gift.id, giftName: gift.name })}
+                onClick={() => setBookingModal({ show: true, giftId: item.id, giftName: item.name, isSurprise })}
               >
                 Rezerwacja
               </button>
@@ -1135,12 +1300,12 @@ function App() {
   };
 
   // Render booking cells inside table
-  const renderGiftBookingsCell = (gift: Gift) => {
-    return renderGiftQueueAndActions(gift);
+  const renderGiftBookingsCell = (item: any, isSurprise: boolean = false) => {
+    return renderGiftQueueAndActions(item, isSurprise);
   };
 
   // Render list of gifts in a compact table view
-  const renderGiftsTable = (giftsList: Gift[], isSurprise: boolean = false) => {
+  const renderGiftsTable = (giftsList: any[], isSurprise: boolean = false) => {
     return (
       <div className="table-responsive">
         <table className="compact-table">
@@ -1157,7 +1322,7 @@ function App() {
           </thead>
           <tbody>
             {giftsList.map(gift => {
-              const giftBookings = bookings.filter(b => b.gift_id === gift.id);
+              const giftBookings = bookings.filter(b => isSurprise ? b.surprise_id === gift.id : b.gift_id === gift.id);
               const approvedBooking = giftBookings.find(b => b.is_approved);
               const isBoughtBySomeoneElse = !isOwnerActiveOccasion && approvedBooking && approvedBooking.user_id !== user?.id;
               const approvedBuyerName = approvedBooking 
@@ -1191,7 +1356,10 @@ function App() {
                     <button 
                       className="btn btn-secondary" 
                       style={{ padding: '0.3rem 0.6rem', fontSize: '0.85rem', fontWeight: 'bold' }} 
-                      onClick={() => setActiveGiftDetails(gift)}
+                      onClick={() => {
+                        setActiveGiftDetails(gift);
+                        setActiveGiftIsSurprise(isSurprise);
+                      }}
                     >
                       ...
                     </button>
@@ -1206,13 +1374,13 @@ function App() {
   };
 
   // Render a single gift card (for tiles view)
-  const renderGiftCard = (gift: Gift, isGuestTab: boolean) => {
-    const isGiftCreator = gift.suggested_by === user?.id;
+  const renderGiftCard = (item: any, isSurprise: boolean = false) => {
+    const isGiftCreator = item.suggested_by === user?.id;
 
-    const votesCount = getVoteCount(gift.id);
-    const userVoted = hasUserVoted(gift.id);
+    const votesCount = getVoteCount(item.id, isSurprise);
+    const userVoted = hasUserVoted(item.id, isSurprise);
 
-    const giftBookings = bookings.filter(b => b.gift_id === gift.id);
+    const giftBookings = bookings.filter(b => isSurprise ? b.surprise_id === item.id : b.gift_id === item.id);
     const approvedBooking = giftBookings.find(b => b.is_approved);
     const isBoughtBySomeoneElse = !isOwnerActiveOccasion && approvedBooking && approvedBooking.user_id !== user?.id;
     const approvedBuyerName = approvedBooking 
@@ -1221,7 +1389,7 @@ function App() {
 
     return (
       <div 
-        key={gift.id} 
+        key={item.id} 
         className="glass-panel gift-card" 
         style={{ 
           position: 'relative',
@@ -1234,16 +1402,16 @@ function App() {
           } : {})
         }}
       >
-        {isGuestTab ? (
+        {isSurprise ? (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', paddingRight: (isGiftCreator || activeOccasion?.creator_id === user?.id) ? '40px' : '0' }}>
             <h3 style={{ margin: 0 }}>
-              {gift.name} {isBoughtBySomeoneElse && <span style={{ fontSize: '0.8rem', fontWeight: 'normal', fontStyle: 'italic', color: 'var(--text-secondary)' }}>(Kupuje: {approvedBuyerName})</span>}
+              {item.name} {isBoughtBySomeoneElse && <span style={{ fontSize: '0.8rem', fontWeight: 'normal', fontStyle: 'italic', color: 'var(--text-secondary)' }}>(Kupuje: {approvedBuyerName})</span>}
             </h3>
             <div className="vote-section" style={{ flexShrink: 0 }}>
               <button 
                 className={`btn ${userVoted ? 'btn-primary' : 'btn-secondary'}`} 
                 style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                onClick={() => userVoted ? handleUnvote(gift.id) : handleVote(gift.id)}
+                onClick={() => userVoted ? handleUnvote(item.id, true) : handleVote(item.id, true)}
                 disabled={isBoughtBySomeoneElse}
               >
                 👍 {votesCount}
@@ -1252,37 +1420,37 @@ function App() {
           </div>
         ) : (
           <h3>
-            {gift.name} {isBoughtBySomeoneElse && <span style={{ fontSize: '0.8rem', fontWeight: 'normal', fontStyle: 'italic', color: 'var(--text-secondary)' }}>(Kupuje: {approvedBuyerName})</span>}
+            {item.name} {isBoughtBySomeoneElse && <span style={{ fontSize: '0.8rem', fontWeight: 'normal', fontStyle: 'italic', color: 'var(--text-secondary)' }}>(Kupuje: {approvedBuyerName})</span>}
           </h3>
         )}
 
-        {gift.description && <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>{gift.description}</p>}
+        {item.description && <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>{item.description}</p>}
         
-        {gift.price && <div className="gift-price" style={{ color: isBoughtBySomeoneElse ? 'var(--text-secondary)' : 'inherit' }}>{gift.price} zł</div>}
+        {item.price && <div className="gift-price" style={{ color: isBoughtBySomeoneElse ? 'var(--text-secondary)' : 'inherit' }}>{item.price} zł</div>}
         
         <div className="gift-meta">
-          {gift.urls && gift.urls.length > 0 ? (
+          {item.urls && item.urls.length > 0 ? (
             <div className="gift-links-list">
-              {gift.urls.map((link, idx) => (
+              {item.urls.map((link: { label: string; url: string }, idx: number) => (
                 <a key={idx} href={link.url} target="_blank" rel="noopener noreferrer" className="gift-link-tag">
                   🔗 {link.label}
                 </a>
               ))}
             </div>
           ) : (
-            gift.url && (
-              <a href={gift.url} target="_blank" rel="noopener noreferrer" className="btn-link" style={{ alignSelf: 'flex-start', marginBottom: '0.5rem' }}>
+            item.url && (
+              <a href={item.url} target="_blank" rel="noopener noreferrer" className="btn-link" style={{ alignSelf: 'flex-start', marginBottom: '0.5rem' }}>
                 🔗 Zobacz w sklepie
               </a>
             )
           )}
-          <span>Zaproponowany przez: {profiles[gift.suggested_by || '']?.display_name || 'Solenizant'}</span>
+          <span>Zaproponowany przez: {profiles[item.suggested_by || '']?.display_name || 'Solenizant'}</span>
         </div>
 
         {/* Bookings section (hidden from occasion owner) */}
         {!isOwnerActiveOccasion && (
           <div style={{ marginTop: 'auto', paddingTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {renderGiftQueueAndActions(gift)}
+            {renderGiftQueueAndActions(item, isSurprise)}
           </div>
         )}
 
@@ -1293,12 +1461,12 @@ function App() {
             style={{ 
               position: 'absolute', 
               top: '10px', 
-              right: isGuestTab ? '55px' : '10px', 
+              right: isSurprise ? '55px' : '10px', 
               padding: '0.3rem 0.6rem', 
               fontSize: '0.75rem',
               zIndex: 10
             }}
-            onClick={() => handleDeleteGift(gift.id)}
+            onClick={() => handleDeleteItem(item.id, isSurprise)}
           >
             Usuń
           </button>
@@ -1640,12 +1808,24 @@ function App() {
             }
 
             const purchasesList = myBookingsList.filter(b => b.is_approved);
-            const reservationsList = myBookingsList.filter(b => 
-              !b.is_approved && !bookings.some(bk => bk.gift_id === b.gift_id && bk.is_approved)
-            );
-            const rejectedList = myBookingsList.filter(b => 
-              !b.is_approved && bookings.some(bk => bk.gift_id === b.gift_id && bk.is_approved)
-            );
+            const reservationsList = myBookingsList.filter(b => {
+              if (b.is_approved) return false;
+              if (b.gift_id) {
+                return !bookings.some(bk => bk.gift_id === b.gift_id && bk.is_approved);
+              } else if (b.surprise_id) {
+                return !bookings.some(bk => bk.surprise_id === b.surprise_id && bk.is_approved);
+              }
+              return false;
+            });
+            const rejectedList = myBookingsList.filter(b => {
+              if (b.is_approved) return false;
+              if (b.gift_id) {
+                return bookings.some(bk => bk.gift_id === b.gift_id && bk.is_approved);
+              } else if (b.surprise_id) {
+                return bookings.some(bk => bk.surprise_id === b.surprise_id && bk.is_approved);
+              }
+              return false;
+            });
 
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
@@ -1677,7 +1857,10 @@ function App() {
                         </thead>
                         <tbody>
                           {purchasesList.map(b => {
-                            const gift = allGifts.find(g => g.id === b.gift_id);
+                            const isSurprise = !!b.surprise_id;
+                            const gift = isSurprise
+                              ? allSurprises.find(s => s.id === b.surprise_id)
+                              : allGifts.find(g => g.id === b.gift_id);
                             if (!gift) return null;
                             const occasion = occasions.find(o => o.id === gift.occasion_id);
                             if (!occasion) return null;
@@ -1685,7 +1868,7 @@ function App() {
                             return (
                               <tr key={b.id}>
                                 <td data-label="Prezent" style={{ fontWeight: 500 }}>
-                                  {gift.name}
+                                  {gift.name} {isSurprise && <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>(Niespodzianka)</span>}
                                 </td>
                                 <td data-label="Wydarzenie">
                                   {occasion.title}
@@ -1728,7 +1911,7 @@ function App() {
                                           title: 'Anuluj zakup',
                                           message: 'Czy na pewno chcesz anulować ten zakup? Organizator wydarzenia zatwierdził już tę rezerwację.',
                                           onConfirm: async () => {
-                                            await handleUnbook(gift.id);
+                                            await handleUnbook(gift.id, isSurprise);
                                             await fetchMyBookingsData();
                                           }
                                         });
@@ -1775,14 +1958,17 @@ function App() {
                         </thead>
                         <tbody>
                           {reservationsList.map(b => {
-                            const gift = allGifts.find(g => g.id === b.gift_id);
+                            const isSurprise = !!b.surprise_id;
+                            const gift = isSurprise
+                              ? allSurprises.find(s => s.id === b.surprise_id)
+                              : allGifts.find(g => g.id === b.gift_id);
                             if (!gift) return null;
                             const occasion = occasions.find(o => o.id === gift.occasion_id);
                             if (!occasion) return null;
 
                             // Calculate queue position
                             const giftBookings = bookings
-                              .filter(bk => bk.gift_id === gift.id)
+                              .filter(bk => isSurprise ? bk.surprise_id === gift.id : bk.gift_id === gift.id)
                               .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
                             const queuePos = giftBookings.findIndex(bk => bk.id === b.id) + 1;
                             const totalInQueue = giftBookings.length;
@@ -1790,7 +1976,7 @@ function App() {
                             return (
                               <tr key={b.id}>
                                 <td data-label="Prezent" style={{ fontWeight: 500 }}>
-                                  {gift.name}
+                                  {gift.name} {isSurprise && <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>(Niespodzianka)</span>}
                                 </td>
                                 <td data-label="Wydarzenie">
                                   {occasion.title}
@@ -1830,7 +2016,7 @@ function App() {
                                       className="btn btn-secondary" 
                                       style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
                                       onClick={async () => {
-                                        await handleUnbook(gift.id);
+                                        await handleUnbook(gift.id, isSurprise);
                                         await fetchMyBookingsData();
                                       }}
                                     >
@@ -1870,12 +2056,18 @@ function App() {
                         </thead>
                         <tbody>
                           {rejectedList.map(b => {
-                            const gift = allGifts.find(g => g.id === b.gift_id);
+                            const isSurprise = !!b.surprise_id;
+                            const gift = isSurprise
+                              ? allSurprises.find(s => s.id === b.surprise_id)
+                              : allGifts.find(g => g.id === b.gift_id);
                             if (!gift) return null;
                             const occasion = occasions.find(o => o.id === gift.occasion_id);
                             if (!occasion) return null;
 
-                            const approvedBooking = bookings.find(bk => bk.gift_id === b.gift_id && bk.is_approved);
+                            const approvedBooking = bookings.find(bk => 
+                              (isSurprise ? bk.surprise_id === b.surprise_id : bk.gift_id === b.gift_id) && 
+                              bk.is_approved
+                            );
                             const approvedBuyerName = approvedBooking 
                               ? (profiles[approvedBooking.user_id]?.display_name || 'Znajomy')
                               : 'Ktoś inny';
@@ -1883,7 +2075,7 @@ function App() {
                             return (
                               <tr key={b.id} style={{ opacity: 0.85 }}>
                                 <td data-label="Prezent" style={{ fontWeight: 500, textDecoration: 'line-through', color: 'var(--text-secondary)' }}>
-                                  {gift.name}
+                                  {gift.name} {isSurprise && <span style={{ fontSize: '0.75rem', textDecoration: 'none', display: 'inline-block' }}>(Niespodzianka)</span>}
                                 </td>
                                 <td data-label="Wydarzenie">
                                   {occasion.title}
@@ -1923,7 +2115,7 @@ function App() {
                                           title: 'Usuń odrzuconą rezerwację',
                                           message: 'Czy na pewno chcesz usunąć tę odrzuconą rezerwację ze swojej listy?',
                                           onConfirm: async () => {
-                                            await handleUnbook(gift.id);
+                                            await handleUnbook(gift.id, isSurprise);
                                             await fetchMyBookingsData();
                                           }
                                         });
@@ -2318,31 +2510,37 @@ function App() {
                   <span className="hide-mobile">Pomysły i niespodzianki gości</span>
                   <span className="show-mobile-inline">Niespodzianki</span> ({goscieGifts.length})
                 </button>
+                <button className={`tab-btn ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>
+                  💬 <span className="hide-mobile">Czat i dyskusja</span>
+                  <span className="show-mobile-inline">Czat</span>
+                </button>
               </div>
             ) : (
               <div></div>
             )}
 
-            <div className="view-toggle" style={{ flexShrink: 0 }}>
-              <button 
-                className={`view-toggle-btn ${giftsView === 'table' ? 'active' : ''}`}
-                onClick={() => {
-                  setGiftsView('table');
-                  localStorage.setItem('gp_gifts_view', 'table');
-                }}
-              >
-                📊 Lista
-              </button>
-              <button 
-                className={`view-toggle-btn ${giftsView === 'grid' ? 'active' : ''}`}
-                onClick={() => {
-                  setGiftsView('grid');
-                  localStorage.setItem('gp_gifts_view', 'grid');
-                }}
-              >
-                🎴 Kafle
-              </button>
-            </div>
+            {activeTab !== 'chat' && (
+              <div className="view-toggle" style={{ flexShrink: 0 }}>
+                <button 
+                  className={`view-toggle-btn ${giftsView === 'table' ? 'active' : ''}`}
+                  onClick={() => {
+                    setGiftsView('table');
+                    localStorage.setItem('gp_gifts_view', 'table');
+                  }}
+                >
+                  📊 Lista
+                </button>
+                <button 
+                  className={`view-toggle-btn ${giftsView === 'grid' ? 'active' : ''}`}
+                  onClick={() => {
+                    setGiftsView('grid');
+                    localStorage.setItem('gp_gifts_view', 'grid');
+                  }}
+                >
+                  🎴 Kafle
+                </button>
+              </div>
+            )}
           </div>
 
           {loading && <div style={{ textAlign: 'center', padding: '2rem' }}>Ładowanie prezentów...</div>}
@@ -2399,6 +2597,179 @@ function App() {
                       </div>
                     )
                   )}
+                </div>
+              )}
+
+              {/* Tab 3: Chat */}
+              {!isOwnerActiveOccasion && activeTab === 'chat' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  <div className="alert alert-info" style={{ margin: 0, background: 'rgba(170, 59, 255, 0.08)', borderColor: 'rgba(170, 59, 255, 0.15)', color: '#d8b4fe' }}>
+                    💬 <strong>Czat wydarzenia</strong>: Rozmawiajcie ze sobą, ustalajcie szczegóły prezentów i niespodzianek. Czat jest w pełni ukryty przed solenizantem ({activeOccasion.owner_name})!
+                  </div>
+
+                  {/* Search and Filter */}
+                  <div className="glass-panel" style={{ padding: '1rem', display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div className="form-group" style={{ flex: 1, margin: 0 }}>
+                      <input 
+                        type="text" 
+                        className="form-control" 
+                        placeholder="🔍 Wyszukaj wiadomości lub nadawcę..." 
+                        value={chatSearch} 
+                        onChange={e => setChatSearch(e.target.value)} 
+                        style={{ padding: '0.6rem 1rem', borderRadius: '8px' }}
+                      />
+                    </div>
+                    {chatSearch && (
+                      <button className="btn btn-secondary" style={{ padding: '0.6rem 1rem' }} onClick={() => setChatSearch('')}>
+                        Wyczyść
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Messages list */}
+                  <div 
+                    className="glass-panel" 
+                    style={{ 
+                      maxHeight: '450px', 
+                      overflowY: 'auto', 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: '1rem',
+                      padding: '1.25rem',
+                      borderRadius: '16px',
+                      background: 'rgba(15, 12, 28, 0.4)'
+                    }}
+                  >
+                    {(() => {
+                      const filteredMessages = messages.filter(m => {
+                        if (!chatSearch.trim()) return true;
+                        const query = chatSearch.toLowerCase();
+                        const textMatch = m.message.toLowerCase().includes(query);
+                        const senderMatch = (profiles[m.user_id]?.display_name || '').toLowerCase().includes(query);
+                        
+                        // Check if the message is linked to a gift or surprise whose name contains the query
+                        let refItemMatch = false;
+                        if (m.gift_id) {
+                          const refGift = gifts.find(g => g.id === m.gift_id);
+                          if (refGift && refGift.name.toLowerCase().includes(query)) {
+                            refItemMatch = true;
+                          }
+                        }
+                        if (m.surprise_id) {
+                          const refSurprise = surprises.find(s => s.id === m.surprise_id);
+                          if (refSurprise && refSurprise.name.toLowerCase().includes(query)) {
+                            refItemMatch = true;
+                          }
+                        }
+                        
+                        return textMatch || senderMatch || refItemMatch;
+                      });
+
+                      if (filteredMessages.length === 0) {
+                        return (
+                          <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-secondary)' }}>
+                            {chatSearch ? 'Brak wiadomości spełniających kryteria wyszukiwania.' : 'Brak wiadomości w tym czacie. Napisz coś pierwszy!'}
+                          </div>
+                        );
+                      }
+
+                      return filteredMessages.map(m => {
+                        const isMe = m.user_id === user.id;
+                        const senderName = profiles[m.user_id]?.display_name || 'Znajomy';
+                        const isGiftMsg = !!m.gift_id;
+                        const isSurpriseMsg = !!m.surprise_id;
+                        
+                        // Find referenced gift/surprise
+                        const refGift = isGiftMsg ? gifts.find(g => g.id === m.gift_id) : null;
+                        const refSurprise = isSurpriseMsg ? surprises.find(s => s.id === m.surprise_id) : null;
+                        const refItem = refGift || refSurprise;
+
+                        return (
+                          <div 
+                            key={m.id} 
+                            style={{ 
+                              display: 'flex', 
+                              flexDirection: 'column',
+                              alignSelf: isMe ? 'flex-end' : 'flex-start',
+                              maxWidth: '80%',
+                              minWidth: '180px'
+                            }}
+                          >
+                            <div style={{ 
+                              fontSize: '0.75rem', 
+                              color: 'var(--text-secondary)', 
+                              marginBottom: '0.25rem',
+                              alignSelf: isMe ? 'flex-end' : 'flex-start',
+                              display: 'flex',
+                              gap: '0.4rem'
+                            }}>
+                              <strong>{isMe ? 'Ty' : senderName}</strong>
+                              <span>•</span>
+                              <span>{formatMessageTime(m.created_at)}</span>
+                            </div>
+
+                            <div 
+                              style={{ 
+                                background: isMe ? 'linear-gradient(135deg, var(--primary), var(--secondary))' : 'rgba(255, 255, 255, 0.05)',
+                                color: 'white',
+                                padding: '0.75rem 1rem',
+                                borderRadius: isMe ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+                                border: isMe ? 'none' : '1px solid rgba(255, 255, 255, 0.06)',
+                                fontSize: '0.925rem',
+                                lineHeight: '1.4',
+                                boxShadow: isMe ? '0 4px 12px rgba(170, 59, 255, 0.15)' : 'none',
+                                wordBreak: 'break-word'
+                              }}
+                            >
+                              {m.message}
+                              
+                              {/* Reference badge */}
+                              {refItem && (
+                                <div 
+                                  onClick={() => {
+                                    setActiveGiftDetails(refItem);
+                                    setActiveGiftIsSurprise(isSurpriseMsg);
+                                  }}
+                                  style={{ 
+                                    marginTop: '0.5rem', 
+                                    padding: '0.3rem 0.5rem', 
+                                    background: 'rgba(0, 0, 0, 0.25)', 
+                                    borderRadius: '6px', 
+                                    fontSize: '0.75rem',
+                                    color: '#d8b4fe',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                    cursor: 'pointer',
+                                    border: '1px solid rgba(255, 255, 255, 0.05)'
+                                  }}
+                                >
+                                  {isSurpriseMsg ? '🤫 Niespodzianka: ' : '🎁 Prezent: '} 
+                                  <strong>{refItem.name}</strong>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+
+                  {/* Input form */}
+                  <form onSubmit={handleSendMessage} style={{ display: 'flex', gap: '0.75rem' }}>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      placeholder="Napisz wiadomość..." 
+                      value={newMessage} 
+                      onChange={e => setNewMessage(e.target.value)} 
+                      style={{ padding: '0.75rem 1rem', borderRadius: '12px' }}
+                      required
+                    />
+                    <button type="submit" className="btn btn-primary" style={{ flexShrink: 0, padding: '0 1.5rem' }}>
+                      Wyślij
+                    </button>
+                  </form>
                 </div>
               )}
             </>
@@ -3075,7 +3446,7 @@ function App() {
       {/* ----------------- GIFT DETAILS MODAL ----------------- */}
       {activeGiftDetails && (
         <div className="modal-overlay" style={{ zIndex: 1900 }}>
-          <div className="glass-panel modal-content" style={{ maxWidth: '500px' }}>
+          <div className="glass-panel modal-content" style={{ maxWidth: '500px', maxHeight: '90vh', overflowY: 'auto' }}>
             <div className="modal-header">
               <h2>Szczegóły prezentu</h2>
               <button className="close-btn" onClick={() => setActiveGiftDetails(null)}>×</button>
@@ -3103,7 +3474,7 @@ function App() {
                 <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Linki do sklepów:</strong>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.25rem' }}>
                   {activeGiftDetails.urls && activeGiftDetails.urls.length > 0 ? (
-                    activeGiftDetails.urls.map((link, idx) => (
+                    activeGiftDetails.urls.map((link: { label: string; url: string }, idx: number) => (
                       <a key={idx} href={link.url} target="_blank" rel="noopener noreferrer" className="gift-link-tag">
                         🔗 {link.label}
                       </a>
@@ -3130,23 +3501,117 @@ function App() {
                 <div>
                   <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Status / Zakup:</strong>
                   <div style={{ marginTop: '0.35rem' }}>
-                    {renderGiftBookingsCell(activeGiftDetails)}
+                    {renderGiftBookingsCell(activeGiftDetails, activeGiftIsSurprise)}
                   </div>
                 </div>
               )}
 
-              {(!isOwnerActiveOccasion && activeTab === 'goscie') && (
+              {(!isOwnerActiveOccasion && activeGiftIsSurprise) && (
                 <div>
                   <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Głosowanie:</strong>
                   <div style={{ marginTop: '0.35rem' }}>
                     <button 
-                      className={`btn ${hasUserVoted(activeGiftDetails.id) ? 'btn-primary' : 'btn-secondary'}`} 
+                      className={`btn ${hasUserVoted(activeGiftDetails.id, activeGiftIsSurprise) ? 'btn-primary' : 'btn-secondary'}`} 
                       style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                      onClick={() => hasUserVoted(activeGiftDetails.id) ? handleUnvote(activeGiftDetails.id) : handleVote(activeGiftDetails.id)}
+                      onClick={() => hasUserVoted(activeGiftDetails.id, activeGiftIsSurprise) ? handleUnvote(activeGiftDetails.id, activeGiftIsSurprise) : handleVote(activeGiftDetails.id, activeGiftIsSurprise)}
                     >
-                      👍 {getVoteCount(activeGiftDetails.id)} Głosów
+                      👍 {getVoteCount(activeGiftDetails.id, activeGiftIsSurprise)} Głosów
                     </button>
                   </div>
+                </div>
+              )}
+
+              {!isOwnerActiveOccasion && (
+                <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)', paddingTop: '1rem', marginTop: '1rem' }}>
+                  <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase', display: 'block', marginBottom: '0.5rem' }}>
+                    💬 Czat / komentarze do prezentu:
+                  </strong>
+                  
+                  {/* Messages list for this gift/surprise */}
+                  <div 
+                    style={{ 
+                      maxHeight: '180px', 
+                      overflowY: 'auto', 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: '0.75rem',
+                      padding: '0.75rem',
+                      borderRadius: '8px',
+                      background: 'rgba(0, 0, 0, 0.25)',
+                      marginBottom: '0.75rem',
+                      border: '1px solid rgba(255, 255, 255, 0.05)'
+                    }}
+                  >
+                    {(() => {
+                      const itemMessages = messages.filter(m => 
+                        activeGiftIsSurprise 
+                          ? m.surprise_id === activeGiftDetails.id 
+                          : m.gift_id === activeGiftDetails.id
+                      );
+
+                      if (itemMessages.length === 0) {
+                        return (
+                          <div style={{ textAlign: 'center', fontSize: '0.85rem', color: 'var(--text-secondary)', padding: '1rem 0' }}>
+                            Brak komentarzy. Napisz coś!
+                          </div>
+                        );
+                      }
+
+                      return itemMessages.map(m => {
+                        const isMe = m.user_id === user.id;
+                        const senderName = profiles[m.user_id]?.display_name || 'Znajomy';
+                        return (
+                          <div 
+                            key={m.id} 
+                            style={{ 
+                              display: 'flex', 
+                              flexDirection: 'column',
+                              alignSelf: isMe ? 'flex-end' : 'flex-start',
+                              maxWidth: '85%'
+                            }}
+                          >
+                            <div style={{ 
+                              fontSize: '0.7rem', 
+                              color: 'var(--text-secondary)', 
+                              marginBottom: '0.15rem',
+                              alignSelf: isMe ? 'flex-end' : 'flex-start'
+                            }}>
+                              <strong>{isMe ? 'Ty' : senderName}</strong> • {formatMessageTime(m.created_at)}
+                            </div>
+                            <div 
+                              style={{ 
+                                background: isMe ? 'linear-gradient(135deg, var(--primary), var(--secondary))' : 'rgba(255, 255, 255, 0.05)',
+                                color: 'white',
+                                padding: '0.5rem 0.75rem',
+                                borderRadius: isMe ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
+                                fontSize: '0.85rem',
+                                border: isMe ? 'none' : '1px solid rgba(255, 255, 255, 0.05)',
+                                wordBreak: 'break-word'
+                              }}
+                            >
+                              {m.message}
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+
+                  {/* Send comment form */}
+                  <form onSubmit={(e) => handleSendComment(e, activeGiftDetails.id, activeGiftIsSurprise)} style={{ display: 'flex', gap: '0.5rem' }}>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      placeholder="Dodaj komentarz..." 
+                      value={newComment} 
+                      onChange={e => setNewComment(e.target.value)} 
+                      style={{ padding: '0.5rem 0.75rem', borderRadius: '8px', fontSize: '0.85rem' }}
+                      required
+                    />
+                    <button type="submit" className="btn btn-primary" style={{ padding: '0 1rem', fontSize: '0.85rem' }}>
+                      Wyślij
+                    </button>
+                  </form>
                 </div>
               )}
             </div>
@@ -3163,11 +3628,11 @@ function App() {
                   type="button" 
                   className="btn btn-danger btn-secondary" 
                   onClick={() => {
-                    handleDeleteGift(activeGiftDetails.id);
+                    handleDeleteItem(activeGiftDetails.id, activeGiftIsSurprise);
                     setActiveGiftDetails(null);
                   }}
                 >
-                  Usuń prezent
+                  {activeGiftIsSurprise ? 'Usuń niespodziankę' : 'Usuń prezent'}
                 </button>
               )}
             </div>
@@ -3192,8 +3657,9 @@ function App() {
                 className="btn btn-primary" 
                 onClick={async () => {
                   const gId = bookingModal.giftId;
+                  const isS = !!bookingModal.isSurprise;
                   setBookingModal(null);
-                  await handleBook(gId, false, null);
+                  await handleBook(gId, false, null, isS);
                 }}
               >
                 👤 Rezerwuję sam (kupuję samodzielnie)
@@ -3203,8 +3669,9 @@ function App() {
                 style={{ border: '1px solid var(--primary)' }}
                 onClick={async () => {
                   const gId = bookingModal.giftId;
+                  const isS = !!bookingModal.isSurprise;
                   setBookingModal(null);
-                  await handleBook(gId, true, generateUUID());
+                  await handleBook(gId, true, generateUUID(), isS);
                 }}
               >
                 👥 Składka (organizuję składkę grupową)
