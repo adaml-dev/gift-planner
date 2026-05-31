@@ -803,7 +803,8 @@ function App() {
       setNewGiftPrice('');
       setGiftVariants([{ label: '', url: '' }]);
       setNewGiftIsSecret(false);
-      fetchGifts(activeOccasion.id);
+      await fetchGifts(activeOccasion.id);
+      await fetchAllGifts();
       setToast({ message: 'Prezent został dodany do listy.', type: 'success' });
     }
     setLoading(false);
@@ -1369,11 +1370,12 @@ function App() {
         <div className="glass-panel auth-card" style={{ maxWidth: selectedProfile ? '500px' : '650px', transition: 'max-width 0.3s ease' }}>
           <div className="auth-header">
             <img src={giftBanner} alt="Gift Planner Logo" width="300" height="200" style={{ objectFit: 'cover' }} />
-            <h1>Kim jesteś?</h1>
+            <h1>Gift Planner</h1>
             <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0.5rem 0', opacity: 0.7 }}>
               v{versionInfo.version} ({versionInfo.date})
             </p>
-            <p>Wybierz swoje imię z listy, aby wejść do aplikacji.</p>
+            <h2 style={{ fontSize: '1.25rem', marginTop: '1rem', color: 'var(--text-primary)' }}>Kim jesteś?</h2>
+            <p style={{ marginTop: '0.5rem' }}>Wybierz swoje imię z listy, aby wejść do aplikacji.</p>
           </div>
 
           {authError && <div className="alert alert-danger">{authError}</div>}
