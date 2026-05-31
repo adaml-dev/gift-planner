@@ -141,6 +141,8 @@ function App() {
   const [chatSearch, setChatSearch] = useState('');
   const [newMessage, setNewMessage] = useState('');
   const [newComment, setNewComment] = useState('');
+  const [chatFilter, setChatFilter] = useState<string>('all');
+  const [showChatSearch, setShowChatSearch] = useState(false);
   const [confirmModal, setConfirmModal] = useState<{
     show: boolean;
     title: string;
@@ -268,13 +270,21 @@ function App() {
     const msgText = newMessage.trim();
     setNewMessage('');
 
+    const insertData: any = {
+      occasion_id: activeOccasion.id,
+      user_id: user.id,
+      message: msgText
+    };
+
+    if (chatFilter.startsWith('gift:')) {
+      insertData.gift_id = chatFilter.split(':')[1];
+    } else if (chatFilter.startsWith('surprise:')) {
+      insertData.surprise_id = chatFilter.split(':')[1];
+    }
+
     const { error } = await supabase
       .from('gp_messages')
-      .insert({
-        occasion_id: activeOccasion.id,
-        user_id: user.id,
-        message: msgText
-      });
+      .insert(insertData);
 
     if (error) {
       setToast({ message: 'Nie udało się wysłać: ' + error.message, type: 'error' });
@@ -478,6 +488,8 @@ function App() {
     setActiveOccasion(occ);
     setView('occasion');
     setActiveTab('solenizant');
+    setChatFilter('all');
+    setShowChatSearch(false);
     setLoading(true);
     await Promise.all([
       fetchGifts(occ.id),
@@ -923,7 +935,7 @@ function App() {
       occasion_id: activeOccasion.id,
       name: newGiftName,
       description: newGiftDesc || null,
-      price: newGiftPrice ? parseFloat(newGiftPrice) : null,
+      price: isSurprise ? null : (newGiftPrice ? parseFloat(newGiftPrice) : null),
       url: filteredVariants[0]?.url || null,
       urls: filteredVariants,
       suggested_by: user.id
@@ -1085,15 +1097,8 @@ function App() {
   // Filter gifts by active tab (Solenizant wishes vs Guest suggestions)
   const isOwnerActiveOccasion = activeOccasion?.owner_id === user?.id;
   
-  // Solenizant tab includes:
-  // - If current user is the owner, only gifts suggested/added by the owner.
-  // - Otherwise, all gifts (which are in public.gp_gifts table).
-  const solenizantGifts = gifts.filter(g => {
-    if (isOwnerActiveOccasion) {
-      return g.suggested_by === user?.id;
-    }
-    return true;
-  });
+  // Solenizant tab includes all gifts in public.gp_gifts table.
+  const solenizantGifts = gifts;
 
   // Guest tab (Pomysły gości) includes:
   // - Surprises loaded from gp_surprises table
@@ -1108,6 +1113,31 @@ function App() {
     votes.some(v => (isSurprise ? v.surprise_id === itemId : v.gift_id === itemId) && v.user_id === user?.id);
   
   const sortedGoscieGifts = [...goscieGifts].sort((a, b) => getVoteCount(b.id, true) - getVoteCount(a.id, true));
+
+  const handleToggleApproveSurprise = async (surpriseId: string, approve: boolean) => {
+    setLoading(true);
+    const { error } = await supabase
+      .from('gp_surprises')
+      .update({ is_approved: approve })
+      .eq('id', surpriseId);
+
+    if (error) {
+      setToast({ message: 'Nie udało się zmienić statusu zatwierdzenia niespodzianki: ' + error.message, type: 'error' });
+    } else {
+      if (activeOccasion) {
+        await fetchSurprises(activeOccasion.id);
+      }
+      await fetchAllSurprises();
+      setToast({ 
+        message: approve ? 'Niespodzianka została zatwierdzona do realizacji!' : 'Cofnięto zatwierdzenie niespodzianki.', 
+        type: 'success' 
+      });
+      if (activeGiftDetails && activeGiftDetails.id === surpriseId) {
+        setActiveGiftDetails((prev: any) => prev ? { ...prev, is_approved: approve } : null);
+      }
+    }
+    setLoading(false);
+  };
 
   const handleToggleApproveBooking = async (bookingId: string, approve: boolean) => {
     setLoading(true);
@@ -1131,6 +1161,99 @@ function App() {
   };
 
   const renderGiftQueueAndActions = (item: any, isSurprise: boolean = false) => {
+    if (isSurprise) {
+      const isOrganizer = activeOccasion?.creator_id === user?.id;
+      const suggesterName = profiles[item.suggested_by]?.display_name || 'Ktoś';
+      
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', width: '100%' }}>
+          <div 
+            style={{ 
+              display: 'flex', 
+              flexDirection: 'column', 
+              gap: '0.35rem', 
+              background: item.is_approved 
+                ? 'rgba(16, 185, 129, 0.08)' 
+                : 'rgba(255, 255, 255, 0.02)', 
+              padding: '0.6rem 0.8rem', 
+              borderRadius: '8px', 
+              border: item.is_approved 
+                ? '1px solid rgba(16, 185, 129, 0.25)' 
+                : '1px solid rgba(255, 255, 255, 0.05)',
+              fontSize: '0.85rem'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
+              <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>
+                🤫 Pomysł gości
+              </span>
+              {item.is_approved ? (
+                <span 
+                  className="badge badge-success" 
+                  style={{ 
+                    fontSize: '0.7rem', 
+                    background: 'rgba(16, 185, 129, 0.15)', 
+                    color: '#10b981', 
+                    border: '1px solid rgba(16, 185, 129, 0.2)',
+                    padding: '0.15rem 0.4rem',
+                    borderRadius: '4px'
+                  }}
+                >
+                  ✓ Zatwierdzona
+                </span>
+              ) : (
+                <span 
+                  className="badge badge-warning" 
+                  style={{ 
+                    fontSize: '0.7rem', 
+                    background: 'rgba(245, 158, 11, 0.15)', 
+                    color: '#fba524', 
+                    border: '1px solid rgba(245, 158, 11, 0.2)',
+                    padding: '0.15rem 0.4rem',
+                    borderRadius: '4px'
+                  }}
+                >
+                  ⏳ Propozycja
+                </span>
+              )}
+            </div>
+            
+            <div style={{ color: 'white', fontWeight: 500, marginTop: '0.25rem' }}>
+              Realizuje autor: <strong style={{ color: 'var(--text-primary)' }}>{suggesterName}</strong>
+            </div>
+
+            {item.is_approved && (
+              <div style={{ fontSize: '0.75rem', color: 'var(--accent-green, #34d399)', fontStyle: 'italic', marginTop: '0.2rem' }}>
+                Organizator zatwierdził tę niespodziankę!
+              </div>
+            )}
+
+            {isOrganizer && (
+              <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.5rem' }}>
+                {item.is_approved ? (
+                  <button 
+                    className="btn btn-secondary" 
+                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#ef4444' }} 
+                    onClick={() => handleToggleApproveSurprise(item.id, false)}
+                  >
+                    🔄 Cofnij zatwierdzenie
+                  </button>
+                ) : (
+                  <button 
+                    className="btn btn-primary" 
+                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', background: '#10b981', borderColor: '#10b981' }} 
+                    onClick={() => handleToggleApproveSurprise(item.id, true)}
+                  >
+                    ✅ Zatwierdź
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     const giftBookings = bookings.filter(b => isSurprise ? b.surprise_id === item.id : b.gift_id === item.id);
     
     const myBooking = giftBookings.find(b => b.user_id === user?.id);
@@ -1792,13 +1915,15 @@ function App() {
 
           {!loading && (() => {
             const myBookingsList = bookings.filter(b => b.user_id === user?.id);
-            if (myBookingsList.length === 0) {
+            const myApprovedSurprises = allSurprises.filter(s => s.suggested_by === user?.id && s.is_approved);
+
+            if (myBookingsList.length === 0 && myApprovedSurprises.length === 0) {
               return (
                 <div className="glass-panel empty-state">
                   <div className="empty-state-icon">🛍️</div>
                   <h3>Brak aktywnych rezerwacji i zakupów</h3>
                   <p style={{ marginBottom: '1.5rem' }}>
-                    Nie masz obecnie żadnych zarezerwowanych prezentów. Przejdź do aktywnego wydarzenia, aby zarezerwować prezent!
+                    Nie masz obecnie żadnych zarezerwowanych prezentów ani zatwierdzonych niespodzianek. Przejdź do aktywnego wydarzenia, aby zarezerwować prezent!
                   </p>
                   <button className="btn btn-primary" onClick={() => setView('dashboard')}>
                     Przeglądaj wydarzenia
@@ -1832,10 +1957,10 @@ function App() {
                 {/* 1. CONFIRMED PURCHASES */}
                 <div>
                   <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    🛍️ Moje Zakupy (Do kupienia) <span className="occasion-badge" style={{ margin: 0, padding: '0.2rem 0.6rem', fontSize: '0.85rem' }}>{purchasesList.length}</span>
+                    🛍️ Moje Zakupy (Do kupienia) <span className="occasion-badge" style={{ margin: 0, padding: '0.2rem 0.6rem', fontSize: '0.85rem' }}>{purchasesList.length + myApprovedSurprises.length}</span>
                   </h2>
                   <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1rem' }}>
-                    Organizator zatwierdził te rezerwacje i zamienił je w polecenie zakupu. Kup te prezenty!
+                    Organizator zatwierdził te rezerwacje i niespodzianki, zamieniając je w polecenie zakupu/realizacji. Kup te prezenty i zorganizuj niespodzianki!
                   </p>
                   
                   {purchasesList.length === 0 ? (
@@ -1918,6 +2043,52 @@ function App() {
                                       }}
                                     >
                                       Anuluj
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {myApprovedSurprises.map(s => {
+                            const occasion = occasions.find(o => o.id === s.occasion_id);
+                            if (!occasion) return null;
+
+                            return (
+                              <tr key={s.id}>
+                                <td data-label="Prezent" style={{ fontWeight: 500 }}>
+                                  {s.name} <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>(Niespodzianka)</span>
+                                </td>
+                                <td data-label="Wydarzenie">
+                                  {occasion.title}
+                                </td>
+                                <td data-label="Data" style={{ whiteSpace: 'nowrap' }}>
+                                  📅 {formatDate(occasion.date)}
+                                </td>
+                                <td data-label="Cena">
+                                  —
+                                </td>
+                                <td data-label="Status">
+                                  <span 
+                                    className="badge badge-success" 
+                                    style={{ 
+                                      background: 'rgba(16, 185, 129, 0.15)', 
+                                      color: '#10b981', 
+                                      border: '1px solid rgba(16, 185, 129, 0.2)',
+                                      padding: '0.15rem 0.4rem',
+                                      borderRadius: '4px'
+                                    }}
+                                  >
+                                    ✓ Zatwierdzony pomysł
+                                  </span>
+                                </td>
+                                <td data-label="Akcje" style={{ textAlign: 'right' }}>
+                                  <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end' }}>
+                                    <button 
+                                      className="btn btn-primary" 
+                                      style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
+                                      onClick={() => selectOccasion(occasion)}
+                                    >
+                                      Pokaż okazję
                                     </button>
                                   </div>
                                 </td>
@@ -2607,23 +2778,72 @@ function App() {
                     💬 <strong>Czat wydarzenia</strong>: Rozmawiajcie ze sobą, ustalajcie szczegóły prezentów i niespodzianek. Czat jest w pełni ukryty przed solenizantem ({activeOccasion.owner_name})!
                   </div>
 
-                  {/* Search and Filter */}
-                  <div className="glass-panel" style={{ padding: '1rem', display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <div className="form-group" style={{ flex: 1, margin: 0 }}>
-                      <input 
-                        type="text" 
+                  {/* Chat Controls: Filter and Search Toggle */}
+                  <div className="glass-panel" style={{ padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                    
+                    {/* Filter Dropdown */}
+                    <div className="form-group" style={{ margin: 0, minWidth: '220px', flex: 1 }}>
+                      <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '0.25rem', display: 'block' }}>Pokazuj wątek:</label>
+                      <select 
                         className="form-control" 
-                        placeholder="🔍 Wyszukaj wiadomości lub nadawcę..." 
-                        value={chatSearch} 
-                        onChange={e => setChatSearch(e.target.value)} 
-                        style={{ padding: '0.6rem 1rem', borderRadius: '8px' }}
-                      />
+                        value={chatFilter} 
+                        onChange={e => setChatFilter(e.target.value)}
+                        style={{ padding: '0.5rem 0.75rem', borderRadius: '8px', fontSize: '0.9rem' }}
+                      >
+                        <option value="all">💬 Wszystkie wiadomości (zbiorczy)</option>
+                        <option value="general">📅 Tylko ogólna dyskusja o wydarzeniu</option>
+                        {gifts.length > 0 && (
+                          <optgroup label="🎁 Prezenty">
+                            {gifts.map(g => (
+                              <option key={g.id} value={`gift:${g.id}`}>🎁 {g.name}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {surprises.length > 0 && (
+                          <optgroup label="🤫 Niespodzianki">
+                            {surprises.map(s => (
+                              <option key={s.id} value={`surprise:${s.id}`}>🤫 {s.name}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </select>
                     </div>
-                    {chatSearch && (
-                      <button className="btn btn-secondary" style={{ padding: '0.6rem 1rem' }} onClick={() => setChatSearch('')}>
-                        Wyczyść
-                      </button>
-                    )}
+
+                    {/* Search Field / Toggle Button */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
+                      {showChatSearch ? (
+                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                          <input 
+                            type="text" 
+                            className="form-control" 
+                            placeholder="Wyszukaj..." 
+                            value={chatSearch} 
+                            onChange={e => setChatSearch(e.target.value)} 
+                            style={{ padding: '0.5rem 0.75rem', borderRadius: '8px', fontSize: '0.9rem', width: '180px' }}
+                            autoFocus
+                          />
+                          <button 
+                            className="btn btn-secondary" 
+                            style={{ padding: '0.5rem 0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }} 
+                            onClick={() => {
+                              setShowChatSearch(false);
+                              setChatSearch('');
+                            }}
+                            title="Zamknij wyszukiwanie"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ) : (
+                        <button 
+                          className="btn btn-secondary" 
+                          style={{ padding: '0.5rem 1rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.9rem' }}
+                          onClick={() => setShowChatSearch(true)}
+                        >
+                          🔍 <span>Szukaj</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {/* Messages list */}
@@ -2642,6 +2862,18 @@ function App() {
                   >
                     {(() => {
                       const filteredMessages = messages.filter(m => {
+                        // 1. Filter by dropdown (thread)
+                        if (chatFilter === 'general') {
+                          if (m.gift_id || m.surprise_id) return false;
+                        } else if (chatFilter.startsWith('gift:')) {
+                          const targetGiftId = chatFilter.split(':')[1];
+                          if (m.gift_id !== targetGiftId) return false;
+                        } else if (chatFilter.startsWith('surprise:')) {
+                          const targetSurpriseId = chatFilter.split(':')[1];
+                          if (m.surprise_id !== targetSurpriseId) return false;
+                        }
+
+                        // 2. Filter by search query
                         if (!chatSearch.trim()) return true;
                         const query = chatSearch.toLowerCase();
                         const textMatch = m.message.toLowerCase().includes(query);
@@ -2708,47 +2940,119 @@ function App() {
                               <span>{formatMessageTime(m.created_at)}</span>
                             </div>
 
-                            <div 
-                              style={{ 
-                                background: isMe ? 'linear-gradient(135deg, var(--primary), var(--secondary))' : 'rgba(255, 255, 255, 0.05)',
-                                color: 'white',
-                                padding: '0.75rem 1rem',
-                                borderRadius: isMe ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-                                border: isMe ? 'none' : '1px solid rgba(255, 255, 255, 0.06)',
-                                fontSize: '0.925rem',
-                                lineHeight: '1.4',
-                                boxShadow: isMe ? '0 4px 12px rgba(170, 59, 255, 0.15)' : 'none',
-                                wordBreak: 'break-word'
-                              }}
-                            >
-                              {m.message}
-                              
-                              {/* Reference badge */}
-                              {refItem && (
+                            {(() => {
+                              let bubbleStyle: React.CSSProperties = {};
+                              if (isMe) {
+                                if (isGiftMsg) {
+                                  bubbleStyle = {
+                                    background: 'linear-gradient(135deg, #0891b2, #0284c7)', // Cyan/blue gradient
+                                    boxShadow: '0 4px 12px rgba(8, 145, 178, 0.15)',
+                                    border: 'none',
+                                    color: 'white'
+                                  };
+                                } else if (isSurpriseMsg) {
+                                  bubbleStyle = {
+                                    background: 'linear-gradient(135deg, #db2777, #7c3aed)', // Magenta/purple gradient
+                                    boxShadow: '0 4px 12px rgba(219, 39, 119, 0.15)',
+                                    border: 'none',
+                                    color: 'white'
+                                  };
+                                } else {
+                                  bubbleStyle = {
+                                    background: 'linear-gradient(135deg, var(--primary), var(--secondary))', // standard violet gradient
+                                    boxShadow: '0 4px 12px rgba(170, 59, 255, 0.15)',
+                                    border: 'none',
+                                    color: 'white'
+                                  };
+                                }
+                              } else {
+                                if (isGiftMsg) {
+                                  bubbleStyle = {
+                                    background: 'rgba(8, 145, 178, 0.06)',
+                                    border: '1px solid rgba(8, 145, 178, 0.25)',
+                                    color: 'white'
+                                  };
+                                } else if (isSurpriseMsg) {
+                                  bubbleStyle = {
+                                    background: 'rgba(219, 39, 119, 0.05)',
+                                    border: '1px solid rgba(219, 39, 119, 0.25)',
+                                    color: 'white'
+                                  };
+                                } else {
+                                  bubbleStyle = {
+                                    background: 'rgba(255, 255, 255, 0.05)',
+                                    border: '1px solid rgba(255, 255, 255, 0.06)',
+                                    color: 'white'
+                                  };
+                                }
+                              }
+
+                              return (
                                 <div 
-                                  onClick={() => {
-                                    setActiveGiftDetails(refItem);
-                                    setActiveGiftIsSurprise(isSurpriseMsg);
-                                  }}
                                   style={{ 
-                                    marginTop: '0.5rem', 
-                                    padding: '0.3rem 0.5rem', 
-                                    background: 'rgba(0, 0, 0, 0.25)', 
-                                    borderRadius: '6px', 
-                                    fontSize: '0.75rem',
-                                    color: '#d8b4fe',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '0.25rem',
-                                    cursor: 'pointer',
-                                    border: '1px solid rgba(255, 255, 255, 0.05)'
+                                    padding: '0.75rem 1rem',
+                                    borderRadius: isMe ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+                                    fontSize: '0.925rem',
+                                    lineHeight: '1.4',
+                                    wordBreak: 'break-word',
+                                    ...bubbleStyle
                                   }}
                                 >
-                                  {isSurpriseMsg ? '🤫 Niespodzianka: ' : '🎁 Prezent: '} 
-                                  <strong>{refItem.name}</strong>
+                                  {m.message}
+                                  
+                                  {/* Reference badge and Transfer button */}
+                                  {refItem && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem' }}>
+                                      <div 
+                                        onClick={() => {
+                                          setActiveGiftDetails(refItem);
+                                          setActiveGiftIsSurprise(isSurpriseMsg);
+                                        }}
+                                        style={{ 
+                                          padding: '0.3rem 0.5rem', 
+                                          background: 'rgba(0, 0, 0, 0.25)', 
+                                          borderRadius: '6px', 
+                                          fontSize: '0.75rem',
+                                          color: isSurpriseMsg ? '#f472b6' : '#22d3ee',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '0.25rem',
+                                          cursor: 'pointer',
+                                          border: '1px solid rgba(255, 255, 255, 0.05)',
+                                          alignSelf: 'flex-start'
+                                        }}
+                                      >
+                                        {isSurpriseMsg ? '🤫 Niespodzianka: ' : '🎁 Prezent: '} 
+                                        <strong>{refItem.name}</strong>
+                                      </div>
+
+                                      <button 
+                                        type="button"
+                                        className="btn btn-secondary"
+                                        style={{ 
+                                          padding: '0.25rem 0.5rem', 
+                                          fontSize: '0.72rem',
+                                          background: 'rgba(255,255,255,0.06)',
+                                          border: '1px solid rgba(255,255,255,0.1)',
+                                          color: 'white',
+                                          alignSelf: 'flex-start',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '0.25rem',
+                                          cursor: 'pointer'
+                                        }}
+                                        onClick={() => {
+                                          setActiveGiftDetails(refItem);
+                                          setActiveGiftIsSurprise(isSurpriseMsg);
+                                        }}
+                                      >
+                                        ➡️ Przenieś do {isSurpriseMsg ? 'niespodzianki' : 'prezentu'}
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
-                              )}
-                            </div>
+                              );
+                            })()}
                           </div>
                         );
                       });
@@ -3048,16 +3352,18 @@ function App() {
                 />
               </div>
 
-              <div className="form-group">
-                <label>Szacowana cena (zł)</label>
-                <input 
-                  type="number" 
-                  className="form-control" 
-                  value={newGiftPrice} 
-                  onChange={e => setNewGiftPrice(e.target.value)} 
-                  placeholder="np. 1200" 
-                />
-              </div>
+              {!newGiftIsSecret && (
+                <div className="form-group">
+                  <label>Szacowana cena (zł)</label>
+                  <input 
+                    type="number" 
+                    className="form-control" 
+                    value={newGiftPrice} 
+                    onChange={e => setNewGiftPrice(e.target.value)} 
+                    placeholder="np. 1200" 
+                  />
+                </div>
+              )}
 
               <div className="form-group">
                 <label>Linki do sklepów / warianty (opcjonalnie)</label>
