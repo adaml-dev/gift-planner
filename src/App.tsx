@@ -74,12 +74,6 @@ interface Vote {
 }
 
 function App() {
-  const [occasionsView, setOccasionsView] = useState<'table' | 'grid'>(
-    () => (localStorage.getItem('gp_occasions_view') as 'table' | 'grid') || 'table'
-  );
-  const [giftsView, setGiftsView] = useState<'table' | 'grid'>(
-    () => (localStorage.getItem('gp_gifts_view') as 'table' | 'grid') || 'table'
-  );
   const [user, setUser] = useState<any>(null);
   const [unlocked, setUnlocked] = useState(() => localStorage.getItem('gp_unlocked') === 'true');
   const [pin, setPin] = useState('');
@@ -1434,9 +1428,10 @@ function App() {
         <table className="compact-table">
           <thead>
             <tr>
-              <th>Prezent</th>
+              <th>{isSurprise ? 'Niespodzianka' : 'Prezent'}</th>
               {isSurprise && <th>Zaproponował</th>}
-              <th>Cena</th>
+              {!isSurprise && <th>Cena</th>}
+              {isSurprise && <th>Głosowanie</th>}
               <th style={{ textAlign: 'right' }}>
                 <span className="hide-mobile">Szczegóły</span>
                 <span className="show-mobile-inline">...</span>
@@ -1457,14 +1452,21 @@ function App() {
               return (
                 <tr 
                   key={gift.id} 
-                  style={isBoughtBySomeoneElse ? { 
-                    opacity: 0.55, 
-                    filter: 'grayscale(100%)', 
-                    background: 'rgba(255, 255, 255, 0.01)',
-                    color: 'var(--text-secondary)'
-                  } : undefined}
+                  style={{
+                    cursor: 'pointer',
+                    ...(isBoughtBySomeoneElse ? { 
+                      opacity: 0.55, 
+                      filter: 'grayscale(100%)', 
+                      background: 'rgba(255, 255, 255, 0.01)',
+                      color: 'var(--text-secondary)'
+                    } : {})
+                  }}
+                  onClick={() => {
+                    setActiveGiftDetails(gift);
+                    setActiveGiftIsSurprise(isSurprise);
+                  }}
                 >
-                  <td data-label="Prezent" style={{ fontWeight: 500 }}>
+                  <td data-label={isSurprise ? 'Niespodzianka' : 'Prezent'} style={{ fontWeight: 500 }}>
                     {gift.name} {isBoughtBySomeoneElse && <span style={{ fontSize: '0.75rem', fontWeight: 'normal', fontStyle: 'italic', marginLeft: '0.4rem', color: 'var(--text-secondary)' }}>(Kupuje: {approvedBuyerName})</span>}
                   </td>
                   {isSurprise && (
@@ -1472,10 +1474,31 @@ function App() {
                       👤 {suggestedByName}
                     </td>
                   )}
-                  <td data-label="Cena" style={{ whiteSpace: 'nowrap' }}>
-                    {gift.price ? <strong style={{ color: isBoughtBySomeoneElse ? 'var(--text-secondary)' : 'var(--text-primary)' }}>{gift.price} zł</strong> : <span style={{ color: 'var(--text-secondary)' }}>—</span>}
-                  </td>
-                  <td data-label="Szczegóły" style={{ textAlign: 'right' }}>
+                  {!isSurprise && (
+                    <td data-label="Cena" style={{ whiteSpace: 'nowrap' }}>
+                      {gift.price ? <strong style={{ color: isBoughtBySomeoneElse ? 'var(--text-secondary)' : 'var(--text-primary)' }}>{gift.price} zł</strong> : <span style={{ color: 'var(--text-secondary)' }}>—</span>}
+                    </td>
+                  )}
+                  {isSurprise && (
+                    <td data-label="Głosowanie" onClick={(e) => e.stopPropagation()}>
+                      <button 
+                        className={`btn ${hasUserVoted(gift.id, true) ? 'btn-primary' : 'btn-secondary'}`} 
+                        style={{ 
+                          padding: '0.25rem 0.5rem', 
+                          fontSize: '0.8rem', 
+                          display: 'inline-flex', 
+                          alignItems: 'center', 
+                          gap: '0.3rem',
+                          borderRadius: '6px'
+                        }}
+                        onClick={() => hasUserVoted(gift.id, true) ? handleUnvote(gift.id, true) : handleVote(gift.id, true)}
+                        disabled={isBoughtBySomeoneElse}
+                      >
+                        👍 {getVoteCount(gift.id, true)}
+                      </button>
+                    </td>
+                  )}
+                  <td data-label="Szczegóły" style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                     <button 
                       className="btn btn-secondary" 
                       style={{ padding: '0.3rem 0.6rem', fontSize: '0.85rem', fontWeight: 'bold' }} 
@@ -1492,108 +1515,6 @@ function App() {
             })}
           </tbody>
         </table>
-      </div>
-    );
-  };
-
-  // Render a single gift card (for tiles view)
-  const renderGiftCard = (item: any, isSurprise: boolean = false) => {
-    const isGiftCreator = item.suggested_by === user?.id;
-
-    const votesCount = getVoteCount(item.id, isSurprise);
-    const userVoted = hasUserVoted(item.id, isSurprise);
-
-    const giftBookings = bookings.filter(b => isSurprise ? b.surprise_id === item.id : b.gift_id === item.id);
-    const approvedBooking = giftBookings.find(b => b.is_approved);
-    const isBoughtBySomeoneElse = !isOwnerActiveOccasion && approvedBooking && approvedBooking.user_id !== user?.id;
-    const approvedBuyerName = approvedBooking 
-      ? (profiles[approvedBooking.user_id]?.display_name || 'Znajomy')
-      : 'Ktoś inny';
-
-    return (
-      <div 
-        key={item.id} 
-        className="glass-panel gift-card" 
-        style={{ 
-          position: 'relative',
-          ...(isBoughtBySomeoneElse ? {
-            opacity: 0.55,
-            filter: 'grayscale(100%)',
-            background: 'rgba(0, 0, 0, 0.15)',
-            borderColor: 'rgba(255, 255, 255, 0.02)',
-            color: 'var(--text-secondary)'
-          } : {})
-        }}
-      >
-        {isSurprise ? (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', paddingRight: (isGiftCreator || activeOccasion?.creator_id === user?.id) ? '40px' : '0' }}>
-            <h3 style={{ margin: 0 }}>
-              {item.name} {isBoughtBySomeoneElse && <span style={{ fontSize: '0.8rem', fontWeight: 'normal', fontStyle: 'italic', color: 'var(--text-secondary)' }}>(Kupuje: {approvedBuyerName})</span>}
-            </h3>
-            <div className="vote-section" style={{ flexShrink: 0 }}>
-              <button 
-                className={`btn ${userVoted ? 'btn-primary' : 'btn-secondary'}`} 
-                style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                onClick={() => userVoted ? handleUnvote(item.id, true) : handleVote(item.id, true)}
-                disabled={isBoughtBySomeoneElse}
-              >
-                👍 {votesCount}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <h3>
-            {item.name} {isBoughtBySomeoneElse && <span style={{ fontSize: '0.8rem', fontWeight: 'normal', fontStyle: 'italic', color: 'var(--text-secondary)' }}>(Kupuje: {approvedBuyerName})</span>}
-          </h3>
-        )}
-
-        {item.description && <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>{item.description}</p>}
-        
-        {item.price && <div className="gift-price" style={{ color: isBoughtBySomeoneElse ? 'var(--text-secondary)' : 'inherit' }}>{item.price} zł</div>}
-        
-        <div className="gift-meta">
-          {item.urls && item.urls.length > 0 ? (
-            <div className="gift-links-list">
-              {item.urls.map((link: { label: string; url: string }, idx: number) => (
-                <a key={idx} href={link.url} target="_blank" rel="noopener noreferrer" className="gift-link-tag">
-                  🔗 {link.label}
-                </a>
-              ))}
-            </div>
-          ) : (
-            item.url && (
-              <a href={item.url} target="_blank" rel="noopener noreferrer" className="btn-link" style={{ alignSelf: 'flex-start', marginBottom: '0.5rem' }}>
-                🔗 Zobacz w sklepie
-              </a>
-            )
-          )}
-          <span>Zaproponowany przez: {profiles[item.suggested_by || '']?.display_name || 'Solenizant'}</span>
-        </div>
-
-        {/* Bookings section (hidden from occasion owner) */}
-        {!isOwnerActiveOccasion && (
-          <div style={{ marginTop: 'auto', paddingTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {renderGiftQueueAndActions(item, isSurprise)}
-          </div>
-        )}
-
-        {/* Show delete button if user added this gift or is occasion creator */}
-        {(isGiftCreator || activeOccasion?.creator_id === user?.id) && (
-          <button 
-            className="btn btn-danger btn-secondary" 
-            style={{ 
-              position: 'absolute', 
-              top: '10px', 
-              right: isSurprise ? '55px' : '10px', 
-              padding: '0.3rem 0.6rem', 
-              fontSize: '0.75rem',
-              zIndex: 10
-            }}
-            onClick={() => handleDeleteItem(item.id, isSurprise)}
-          >
-            Usuń
-          </button>
-        )}
       </div>
     );
   };
@@ -2343,27 +2264,6 @@ function App() {
                 🗄️ Archiwum i minione ({archivedOrPastOccasions.length})
               </button>
             </div>
-
-            <div className="view-toggle" style={{ flexShrink: 0 }}>
-              <button 
-                className={`view-toggle-btn ${occasionsView === 'table' ? 'active' : ''}`}
-                onClick={() => {
-                  setOccasionsView('table');
-                  localStorage.setItem('gp_occasions_view', 'table');
-                }}
-              >
-                📊 Lista
-              </button>
-              <button 
-                className={`view-toggle-btn ${occasionsView === 'grid' ? 'active' : ''}`}
-                onClick={() => {
-                  setOccasionsView('grid');
-                  localStorage.setItem('gp_occasions_view', 'grid');
-                }}
-              >
-                🎴 Kafle
-              </button>
-            </div>
           </div>
 
           {myRejectedBookingsCount > 0 && (
@@ -2430,7 +2330,7 @@ function App() {
             </div>
           )}
 
-          {occasionsView === 'table' ? (
+          {!loading && filteredOccasions.length > 0 && (
             <div className="table-responsive">
               <table className="compact-table">
                 <thead>
@@ -2446,7 +2346,11 @@ function App() {
                 <tbody>
                   {filteredOccasions.map(occ => {
                     return (
-                      <tr key={occ.id}>
+                      <tr 
+                        key={occ.id}
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => selectOccasion(occ)}
+                      >
                         <td data-label="Okazja" style={{ fontWeight: 500 }}>{occ.title}</td>
                         <td data-label="Data" style={{ whiteSpace: 'nowrap' }}>
                           📅 {formatDate(occ.date)} {occ.time && `o ${occ.time}`}
@@ -2477,7 +2381,7 @@ function App() {
                             </span>
                           )}
                         </td>
-                        <td data-label="Szczegóły" style={{ textAlign: 'right' }}>
+                        <td data-label="Szczegóły" style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                           <button 
                             className="btn btn-secondary" 
                             style={{ padding: '0.3rem 0.6rem', fontSize: '0.85rem', fontWeight: 'bold' }} 
@@ -2491,74 +2395,6 @@ function App() {
                   })}
                 </tbody>
               </table>
-            </div>
-          ) : (
-            <div className="occasions-grid">
-              {filteredOccasions.map(occ => {
-                const daysLeft = getDaysLeft(occ.date);
-                const isCreator = occ.creator_id === user.id;
-                const isOwner = occ.owner_id === user.id;
-
-                return (
-                  <div key={occ.id} className="glass-panel occasion-card" onClick={() => selectOccasion(occ)}>
-                    <div 
-                      className="occasion-badge" 
-                      style={occ.is_archived ? { background: 'rgba(255, 255, 255, 0.1)', color: 'var(--text-secondary)' } : (occ.is_draft ? { background: 'rgba(245, 158, 11, 0.15)', color: '#fba524' } : undefined)}
-                    >
-                      {occ.is_archived ? '🗄️ Zarchiwizowane' : (occ.is_draft ? '🛠️ Robocze' : daysLeft)}
-                    </div>
-                    <h3>{occ.title}</h3>
-                    <div className="occasion-meta">
-                      📅 {formatDate(occ.date)} {occ.time && `o ${occ.time}`}
-                      <br />
-                      👤 Dla: <strong>{occ.owner_name}</strong> {isOwner && '(To Ty!)'}
-                      {occ.location && (
-                        <>
-                          <br />
-                          📍 {occ.location}
-                        </>
-                      )}
-                    </div>
-                    {occ.description && <p className="occasion-desc">{occ.description}</p>}
-                    <div className="occasion-actions">
-                      <div className="creator-info">
-                        <div className="avatar">
-                          {(profiles[occ.creator_id]?.display_name || '?')[0].toUpperCase()}
-                        </div>
-                        Stworzył: {profiles[occ.creator_id]?.display_name || 'Ktoś'}
-                      </div>
-                      {isCreator && (
-                        <div style={{ display: 'flex', gap: '0.35rem' }} onClick={e => e.stopPropagation()}>
-                          <button 
-                            className="btn btn-secondary" 
-                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }} 
-                            onClick={() => startEditOccasion(occ)}
-                            title="Edytuj"
-                          >
-                            ✏️
-                          </button>
-                          <button 
-                            className="btn btn-secondary" 
-                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }} 
-                            onClick={() => handleToggleArchiveOccasion(occ)}
-                            title={occ.is_archived ? "Przywróć" : "Zarchiwizuj"}
-                          >
-                            🗄️
-                          </button>
-                          <button 
-                            className="btn btn-danger btn-secondary" 
-                            style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }} 
-                            onClick={(e) => handleDeleteOccasion(occ.id, e)}
-                            title="Usuń"
-                          >
-                            🗑️
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
             </div>
           )}
         </main>
@@ -2689,29 +2525,6 @@ function App() {
             ) : (
               <div></div>
             )}
-
-            {activeTab !== 'chat' && (
-              <div className="view-toggle" style={{ flexShrink: 0 }}>
-                <button 
-                  className={`view-toggle-btn ${giftsView === 'table' ? 'active' : ''}`}
-                  onClick={() => {
-                    setGiftsView('table');
-                    localStorage.setItem('gp_gifts_view', 'table');
-                  }}
-                >
-                  📊 Lista
-                </button>
-                <button 
-                  className={`view-toggle-btn ${giftsView === 'grid' ? 'active' : ''}`}
-                  onClick={() => {
-                    setGiftsView('grid');
-                    localStorage.setItem('gp_gifts_view', 'grid');
-                  }}
-                >
-                  🎴 Kafle
-                </button>
-              </div>
-            )}
           </div>
 
           {loading && <div style={{ textAlign: 'center', padding: '2rem' }}>Ładowanie prezentów...</div>}
@@ -2732,13 +2545,7 @@ function App() {
                       </button>
                     </div>
                   ) : (
-                    giftsView === 'table' ? (
-                      renderGiftsTable(solenizantGifts)
-                    ) : (
-                      <div className="gifts-grid">
-                        {solenizantGifts.map(gift => renderGiftCard(gift, false))}
-                      </div>
-                    )
+                    renderGiftsTable(solenizantGifts)
                   )}
                 </div>
               )}
@@ -2760,13 +2567,7 @@ function App() {
                       </button>
                     </div>
                   ) : (
-                    giftsView === 'table' ? (
-                      renderGiftsTable(sortedGoscieGifts, true)
-                    ) : (
-                      <div className="gifts-grid">
-                        {sortedGoscieGifts.map(gift => renderGiftCard(gift, true))}
-                      </div>
-                    )
+                    renderGiftsTable(sortedGoscieGifts, true)
                   )}
                 </div>
               )}
@@ -2876,20 +2677,20 @@ function App() {
                         // 2. Filter by search query
                         if (!chatSearch.trim()) return true;
                         const query = chatSearch.toLowerCase();
-                        const textMatch = m.message.toLowerCase().includes(query);
+                        const textMatch = (m.message || '').toLowerCase().includes(query);
                         const senderMatch = (profiles[m.user_id]?.display_name || '').toLowerCase().includes(query);
                         
                         // Check if the message is linked to a gift or surprise whose name contains the query
                         let refItemMatch = false;
                         if (m.gift_id) {
                           const refGift = gifts.find(g => g.id === m.gift_id);
-                          if (refGift && refGift.name.toLowerCase().includes(query)) {
+                          if (refGift && refGift.name && refGift.name.toLowerCase().includes(query)) {
                             refItemMatch = true;
                           }
                         }
                         if (m.surprise_id) {
                           const refSurprise = surprises.find(s => s.id === m.surprise_id);
-                          if (refSurprise && refSurprise.name.toLowerCase().includes(query)) {
+                          if (refSurprise && refSurprise.name && refSurprise.name.toLowerCase().includes(query)) {
                             refItemMatch = true;
                           }
                         }
@@ -2906,7 +2707,7 @@ function App() {
                       }
 
                       return filteredMessages.map(m => {
-                        const isMe = m.user_id === user.id;
+                        const isMe = m.user_id === user?.id;
                         const senderName = profiles[m.user_id]?.display_name || 'Znajomy';
                         const isGiftMsg = !!m.gift_id;
                         const isSurpriseMsg = !!m.surprise_id;
@@ -2943,48 +2744,48 @@ function App() {
                             {(() => {
                               let bubbleStyle: React.CSSProperties = {};
                               if (isMe) {
-                                if (isGiftMsg) {
-                                  bubbleStyle = {
-                                    background: 'linear-gradient(135deg, #0891b2, #0284c7)', // Cyan/blue gradient
-                                    boxShadow: '0 4px 12px rgba(8, 145, 178, 0.15)',
-                                    border: 'none',
-                                    color: 'white'
-                                  };
-                                } else if (isSurpriseMsg) {
-                                  bubbleStyle = {
-                                    background: 'linear-gradient(135deg, #db2777, #7c3aed)', // Magenta/purple gradient
-                                    boxShadow: '0 4px 12px rgba(219, 39, 119, 0.15)',
-                                    border: 'none',
-                                    color: 'white'
-                                  };
-                                } else {
-                                  bubbleStyle = {
-                                    background: 'linear-gradient(135deg, var(--primary), var(--secondary))', // standard violet gradient
-                                    boxShadow: '0 4px 12px rgba(170, 59, 255, 0.15)',
-                                    border: 'none',
-                                    color: 'white'
-                                  };
-                                }
+                                  if (isGiftMsg) {
+                                    bubbleStyle = {
+                                      background: 'linear-gradient(135deg, #0891b2, #0284c7)', // Cyan/blue gradient
+                                      boxShadow: '0 4px 12px rgba(8, 145, 178, 0.15)',
+                                      border: 'none',
+                                      color: 'white'
+                                    };
+                                  } else if (isSurpriseMsg) {
+                                    bubbleStyle = {
+                                      background: 'linear-gradient(135deg, #db2777, #7c3aed)', // Magenta/purple gradient
+                                      boxShadow: '0 4px 12px rgba(219, 39, 119, 0.15)',
+                                      border: 'none',
+                                      color: 'white'
+                                    };
+                                  } else {
+                                    bubbleStyle = {
+                                      background: 'linear-gradient(135deg, var(--primary), var(--secondary))', // standard violet gradient
+                                      boxShadow: '0 4px 12px rgba(170, 59, 255, 0.15)',
+                                      border: 'none',
+                                      color: 'white'
+                                    };
+                                  }
                               } else {
-                                if (isGiftMsg) {
-                                  bubbleStyle = {
-                                    background: 'rgba(8, 145, 178, 0.06)',
-                                    border: '1px solid rgba(8, 145, 178, 0.25)',
-                                    color: 'white'
-                                  };
-                                } else if (isSurpriseMsg) {
-                                  bubbleStyle = {
-                                    background: 'rgba(219, 39, 119, 0.05)',
-                                    border: '1px solid rgba(219, 39, 119, 0.25)',
-                                    color: 'white'
-                                  };
-                                } else {
-                                  bubbleStyle = {
-                                    background: 'rgba(255, 255, 255, 0.05)',
-                                    border: '1px solid rgba(255, 255, 255, 0.06)',
-                                    color: 'white'
-                                  };
-                                }
+                                  if (isGiftMsg) {
+                                    bubbleStyle = {
+                                      background: 'rgba(8, 145, 178, 0.06)',
+                                      border: '1px solid rgba(8, 145, 178, 0.25)',
+                                      color: 'white'
+                                    };
+                                  } else if (isSurpriseMsg) {
+                                    bubbleStyle = {
+                                      background: 'rgba(219, 39, 119, 0.05)',
+                                      border: '1px solid rgba(219, 39, 119, 0.25)',
+                                      color: 'white'
+                                    };
+                                  } else {
+                                    bubbleStyle = {
+                                      background: 'rgba(255, 255, 255, 0.05)',
+                                      border: '1px solid rgba(255, 255, 255, 0.06)',
+                                      color: 'white'
+                                    };
+                                  }
                               }
 
                               return (
@@ -3000,8 +2801,8 @@ function App() {
                                 >
                                   {m.message}
                                   
-                                  {/* Reference badge and Transfer button */}
-                                  {refItem && (
+                                  {/* Reference badge */}
+                                  {refItem ? (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem' }}>
                                       <div 
                                         onClick={() => {
@@ -3025,31 +2826,8 @@ function App() {
                                         {isSurpriseMsg ? '🤫 Niespodzianka: ' : '🎁 Prezent: '} 
                                         <strong>{refItem.name}</strong>
                                       </div>
-
-                                      <button 
-                                        type="button"
-                                        className="btn btn-secondary"
-                                        style={{ 
-                                          padding: '0.25rem 0.5rem', 
-                                          fontSize: '0.72rem',
-                                          background: 'rgba(255,255,255,0.06)',
-                                          border: '1px solid rgba(255,255,255,0.1)',
-                                          color: 'white',
-                                          alignSelf: 'flex-start',
-                                          display: 'inline-flex',
-                                          alignItems: 'center',
-                                          gap: '0.25rem',
-                                          cursor: 'pointer'
-                                        }}
-                                        onClick={() => {
-                                          setActiveGiftDetails(refItem);
-                                          setActiveGiftIsSurprise(isSurpriseMsg);
-                                        }}
-                                      >
-                                        ➡️ Przenieś do {isSurpriseMsg ? 'niespodzianki' : 'prezentu'}
-                                      </button>
                                     </div>
-                                  )}
+                                  ) : null}
                                 </div>
                               );
                             })()}
@@ -3864,7 +3642,7 @@ function App() {
                       }
 
                       return itemMessages.map(m => {
-                        const isMe = m.user_id === user.id;
+                        const isMe = m.user_id === user?.id;
                         const senderName = profiles[m.user_id]?.display_name || 'Znajomy';
                         return (
                           <div 
