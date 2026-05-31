@@ -149,7 +149,13 @@ function App() {
   const [newMemberIsAdmin, setNewMemberIsAdmin] = useState(false);
   const [newMemberPassword, setNewMemberPassword] = useState('');
 
-
+  // Find bookings of the current user that are rejected (i.e. not approved, but someone else has an approved booking for the same gift)
+  const myRejectedBookings = user ? bookings.filter(b => {
+    if (b.user_id !== user.id) return false;
+    if (b.is_approved) return false;
+    return bookings.some(otherB => otherB.gift_id === b.gift_id && otherB.is_approved);
+  }) : [];
+  const myRejectedBookingsCount = myRejectedBookings.length;
 
   // 1. Monitor Auth status & Initialize App
   useEffect(() => {
@@ -196,6 +202,8 @@ function App() {
   useEffect(() => {
     if (user) {
       fetchOccasions();
+      fetchBookings();
+      fetchAllGifts();
     }
   }, [user]);
 
@@ -966,11 +974,16 @@ function App() {
                     display: 'flex', 
                     flexDirection: 'column', 
                     gap: '0.35rem', 
-                    background: b.is_approved ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255, 255, 255, 0.02)', 
+                    background: b.is_approved 
+                      ? 'rgba(16, 185, 129, 0.08)' 
+                      : (hasApproved ? 'rgba(239, 68, 68, 0.03)' : 'rgba(255, 255, 255, 0.02)'), 
                     padding: '0.6rem 0.8rem', 
                     borderRadius: '8px', 
-                    border: b.is_approved ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid rgba(255, 255, 255, 0.05)',
-                    fontSize: '0.85rem'
+                    border: b.is_approved 
+                      ? '1px solid rgba(16, 185, 129, 0.25)' 
+                      : (hasApproved ? '1px solid rgba(239, 68, 68, 0.15)' : '1px solid rgba(255, 255, 255, 0.05)'),
+                    fontSize: '0.85rem',
+                    opacity: (!b.is_approved && hasApproved) ? 0.75 : 1
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
@@ -990,6 +1003,20 @@ function App() {
                         }}
                       >
                         ✓ Polecenie zakupu
+                      </span>
+                    ) : hasApproved ? (
+                      <span 
+                        className="badge badge-danger" 
+                        style={{ 
+                          fontSize: '0.7rem', 
+                          background: 'rgba(239, 68, 68, 0.15)', 
+                          color: 'var(--accent-red, #ef4444)', 
+                          border: '1px solid rgba(239, 68, 68, 0.2)',
+                          padding: '0.15rem 0.4rem',
+                          borderRadius: '4px'
+                        }}
+                      >
+                        ❌ Odrzucona
                       </span>
                     ) : (
                       <span 
@@ -1011,6 +1038,12 @@ function App() {
                   <div style={{ color: 'white', fontWeight: 500 }}>
                     Kupujący: <strong style={{ color: 'var(--text-primary)' }}>{isMyBooking ? 'Ty' : displayName}</strong>
                   </div>
+
+                  {!b.is_approved && hasApproved && (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--accent-red, #fca5a5)', fontStyle: 'italic' }}>
+                      Organizator zatwierdził zakup przez: {approvedBooking ? (profiles[approvedBooking.user_id]?.display_name || 'innego uczestnika') : 'innego uczestnika'}
+                    </div>
+                  )}
 
                   {/* Actions for this specific booking item */}
                   <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
@@ -1402,10 +1435,39 @@ function App() {
             </span>
             <button 
               className={`btn ${view === 'my-bookings' ? 'btn-primary' : 'btn-secondary'}`} 
-              style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }} 
+              style={{ 
+                padding: '0.5rem 1rem', 
+                fontSize: '0.85rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem'
+              }} 
               onClick={openMyBookings}
             >
-              🛍️ <span className="hide-mobile">Moje rezerwacje</span><span className="show-mobile-inline">Moje</span>
+              <span>🛍️</span>
+              <span className="hide-mobile">Moje rezerwacje</span>
+              <span className="show-mobile-inline">Moje</span>
+              {myRejectedBookingsCount > 0 && (
+                <span 
+                  style={{ 
+                    background: 'var(--accent-red, #ef4444)', 
+                    color: 'white', 
+                    borderRadius: '50%', 
+                    minWidth: '18px', 
+                    height: '18px', 
+                    padding: '0 4px',
+                    display: 'inline-flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    fontSize: '0.7rem',
+                    fontWeight: 'bold',
+                    boxShadow: '0 0 8px rgba(239, 68, 68, 0.5)'
+                  }}
+                  title={`Masz ${myRejectedBookingsCount} odrzuconych rezerwacji!`}
+                >
+                  {myRejectedBookingsCount}
+                </span>
+              )}
             </button>
             <button className="btn btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }} onClick={handleLogout}>
               Wyloguj
@@ -1502,7 +1564,12 @@ function App() {
             }
 
             const purchasesList = myBookingsList.filter(b => b.is_approved);
-            const reservationsList = myBookingsList.filter(b => !b.is_approved);
+            const reservationsList = myBookingsList.filter(b => 
+              !b.is_approved && !bookings.some(bk => bk.gift_id === b.gift_id && bk.is_approved)
+            );
+            const rejectedList = myBookingsList.filter(b => 
+              !b.is_approved && bookings.some(bk => bk.gift_id === b.gift_id && bk.is_approved)
+            );
 
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
@@ -1698,6 +1765,96 @@ function App() {
                     </div>
                   )}
                 </div>
+
+                {/* 3. REJECTED RESERVATIONS */}
+                {rejectedList.length > 0 && (
+                  <div>
+                    <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--accent-red, #f87171)' }}>
+                      ❌ Odrzucone Rezerwacje <span className="occasion-badge" style={{ margin: 0, padding: '0.2rem 0.6rem', fontSize: '0.85rem', background: 'rgba(239, 68, 68, 0.15)', color: 'var(--accent-red, #ef4444)' }}>{rejectedList.length}</span>
+                    </h2>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1rem' }}>
+                      Organizator zatwierdził zakup tych prezentów przez innych uczestników. Twoje rezerwacje zostały odrzucone.
+                    </p>
+
+                    <div className="table-responsive" style={{ marginTop: '0.5rem' }}>
+                      <table className="compact-table">
+                        <thead>
+                          <tr>
+                            <th>Prezent</th>
+                            <th>Wydarzenie</th>
+                            <th>Status</th>
+                            <th>Kupujący</th>
+                            <th style={{ textAlign: 'right' }}>Akcje</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rejectedList.map(b => {
+                            const gift = allGifts.find(g => g.id === b.gift_id);
+                            if (!gift) return null;
+                            const occasion = occasions.find(o => o.id === gift.occasion_id);
+                            if (!occasion) return null;
+
+                            const approvedBooking = bookings.find(bk => bk.gift_id === b.gift_id && bk.is_approved);
+                            const approvedBuyerName = approvedBooking 
+                              ? (profiles[approvedBooking.user_id]?.display_name || 'Znajomy')
+                              : 'Ktoś inny';
+
+                            return (
+                              <tr key={b.id} style={{ opacity: 0.85 }}>
+                                <td data-label="Prezent" style={{ fontWeight: 500, textDecoration: 'line-through', color: 'var(--text-secondary)' }}>
+                                  {gift.name}
+                                </td>
+                                <td data-label="Wydarzenie">
+                                  {occasion.title}
+                                </td>
+                                <td data-label="Status">
+                                  <span 
+                                    className="badge badge-danger" 
+                                    style={{ 
+                                      background: 'rgba(239, 68, 68, 0.15)', 
+                                      color: 'var(--accent-red, #ef4444)', 
+                                      border: '1px solid rgba(239, 68, 68, 0.2)',
+                                      padding: '0.15rem 0.4rem',
+                                      borderRadius: '4px'
+                                    }}
+                                  >
+                                    ❌ Odrzucona
+                                  </span>
+                                </td>
+                                <td data-label="Kupujący" style={{ fontStyle: 'italic', color: 'var(--text-secondary)' }}>
+                                  Kupuje: {approvedBuyerName}
+                                </td>
+                                <td data-label="Akcje" style={{ textAlign: 'right' }}>
+                                  <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end' }}>
+                                    <button 
+                                      className="btn btn-primary" 
+                                      style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
+                                      onClick={() => selectOccasion(occasion)}
+                                    >
+                                      Pokaż okazję
+                                    </button>
+                                    <button 
+                                      className="btn btn-secondary" 
+                                      style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem', color: 'var(--accent-red, #ef4444)', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                                      onClick={async () => {
+                                        if (window.confirm("Czy na pewno chcesz usunąć tę odrzuconą rezerwację ze swojej listy?")) {
+                                          await handleUnbook(gift.id);
+                                          await fetchMyBookingsData();
+                                        }
+                                      }}
+                                    >
+                                      Usuń z listy
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })()}
@@ -1759,6 +1916,45 @@ function App() {
               </button>
             </div>
           </div>
+
+          {myRejectedBookingsCount > 0 && (
+            <div 
+              className="alert alert-warning" 
+              style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center', 
+                marginBottom: '1.5rem', 
+                background: 'rgba(239, 68, 68, 0.1)', 
+                border: '1px solid rgba(239, 68, 68, 0.25)', 
+                color: 'var(--accent-red, #f87171)',
+                padding: '0.8rem 1rem',
+                borderRadius: '8px',
+                fontSize: '0.9rem'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <span style={{ fontSize: '1.1rem' }}>⚠️</span>
+                <span>
+                  Jedna lub więcej Twoich rezerwacji zostało <strong>odrzuconych</strong>, ponieważ organizator zatwierdził zakup przez inną osobę.
+                </span>
+              </div>
+              <button 
+                className="btn btn-secondary" 
+                style={{ 
+                  padding: '0.25rem 0.6rem', 
+                  fontSize: '0.75rem', 
+                  borderColor: 'rgba(239, 68, 68, 0.3)',
+                  color: 'var(--text-primary, white)',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  cursor: 'pointer'
+                }}
+                onClick={openMyBookings}
+              >
+                Pokaż szczegóły
+              </button>
+            </div>
+          )}
 
           {errorMsg && <div className="alert alert-danger">{errorMsg}</div>}
 
