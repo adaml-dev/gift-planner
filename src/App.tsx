@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { supabase, authAdminClient } from './supabase';
 import giftBanner from './assets/gift_banner.png';
 
+declare const __COMMIT_HASH__: string;
+declare const __COMMIT_DATE__: string;
+
 const generateUUID = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -1266,6 +1269,9 @@ function App() {
           <div className="auth-header">
             <img src={giftBanner} alt="Gift Planner Logo" width="300" height="200" style={{ objectFit: 'cover' }} />
             <h1>Gift Planner</h1>
+            <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0.5rem 0', opacity: 0.7 }}>
+              v-{__COMMIT_HASH__} ({__COMMIT_DATE__})
+            </p>
             <p>Wpisz 4-cyfrowy kod PIN, aby uzyskać dostęp do aplikacji rodzinnej.</p>
           </div>
 
@@ -1306,6 +1312,9 @@ function App() {
           <div className="auth-header">
             <img src={giftBanner} alt="Gift Planner Logo" width="300" height="200" style={{ objectFit: 'cover' }} />
             <h1>Kim jesteś?</h1>
+            <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0.5rem 0', opacity: 0.7 }}>
+              v-{__COMMIT_HASH__} ({__COMMIT_DATE__})
+            </p>
             <p>Wybierz swoje imię z listy, aby wejść do aplikacji.</p>
           </div>
 
@@ -1421,8 +1430,11 @@ function App() {
     return (
       <nav className="navbar">
         <div className="navbar-container">
-          <div className="navbar-brand" onClick={() => { setView('dashboard'); setActiveOccasion(null); }}>
-            🎁 Gift Planner
+          <div className="navbar-brand" onClick={() => { setView('dashboard'); setActiveOccasion(null); }} style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', cursor: 'pointer' }}>
+            <span style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>🎁 Gift Planner</span>
+            <span style={{ fontSize: '0.65rem', fontWeight: 'normal', color: 'var(--text-secondary)', opacity: 0.7 }}>
+              v-{__COMMIT_HASH__} ({__COMMIT_DATE__})
+            </span>
           </div>
           <div className="navbar-user">
             {isAdmin && (
