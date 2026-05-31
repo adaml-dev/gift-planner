@@ -1358,7 +1358,7 @@ function App() {
                 </span>
               )}
             </div>
-            
+
             <div style={{ color: 'white', fontWeight: 500, marginTop: '0.25rem' }}>
               Realizuje autor: <strong style={{ color: 'var(--text-primary)' }}>{suggesterName}</strong>
             </div>
@@ -1372,17 +1372,17 @@ function App() {
             {isOrganizer && (
               <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.5rem' }}>
                 {item.is_approved ? (
-                  <button 
-                    className="btn btn-secondary" 
-                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#ef4444' }} 
+                  <button
+                    className="btn btn-secondary"
+                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#ef4444' }}
                     onClick={() => handleToggleApproveSurprise(item.id, false)}
                   >
                     🔄 Cofnij zatwierdzenie
                   </button>
                 ) : (
-                  <button 
-                    className="btn btn-primary" 
-                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', background: '#10b981', borderColor: '#10b981' }} 
+                  <button
+                    className="btn btn-primary"
+                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', background: '#10b981', borderColor: '#10b981' }}
                     onClick={() => handleToggleApproveSurprise(item.id, true)}
                   >
                     ✅ Zatwierdź
@@ -1395,118 +1395,109 @@ function App() {
       );
     }
 
-    const giftBookings = bookings.filter(b => isSurprise ? b.surprise_id === item.id : b.gift_id === item.id);
-    
-    const myBooking = giftBookings.find(b => b.user_id === user?.id);
+    // --- GIFTS: group bookings by group_id ---
+    const allGiftBookings = bookings.filter(b => isSurprise ? b.surprise_id === item.id : b.gift_id === item.id);
+
+    // Build groups: { groupKey -> bookings[] }
+    // groupKey = group_id for group bookings, or booking.id for solo bookings
+    const groupMap = new Map<string, any[]>();
+    allGiftBookings.forEach(b => {
+      const key = (b.is_group && b.group_id) ? b.group_id : b.id;
+      if (!groupMap.has(key)) groupMap.set(key, []);
+      groupMap.get(key)!.push(b);
+    });
+
+    const groups = Array.from(groupMap.entries()); // [key, bookings[]]
+
+    const myBooking = allGiftBookings.find(b => b.user_id === user?.id);
     const hasMyBooking = !!myBooking;
-    const approvedBooking = giftBookings.find(b => b.is_approved);
+    const approvedBooking = allGiftBookings.find(b => b.is_approved);
     const hasApproved = !!approvedBooking;
     const isOrganizer = activeOccasion?.creator_id === user?.id;
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', width: '100%' }}>
-        {giftBookings.length > 0 && (
+        {groups.length > 0 && (
           <div className="bookings-queue" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            {giftBookings.map((b, idx) => {
-              const isMyBooking = b.user_id === user?.id;
-              const displayName = profiles[b.user_id]?.display_name || 'Znajomy';
+            {groups.map(([groupKey, groupBookings], idx) => {
+              const isGroup = groupBookings[0].is_group && !!groupBookings[0].group_id;
+              const isThisGroupApproved = groupBookings.some(b => b.is_approved);
+              const isMyGroup = groupBookings.some(b => b.user_id === user?.id);
+              const memberNames = groupBookings.map(b => {
+                const name = profiles[b.user_id]?.display_name || 'Znajomy';
+                return b.user_id === user?.id ? 'Ty' : name;
+              });
 
               return (
-                <div 
-                  key={b.id} 
-                  style={{ 
-                    display: 'flex', 
-                    flexDirection: 'column', 
-                    gap: '0.35rem', 
-                    background: b.is_approved 
-                      ? 'rgba(16, 185, 129, 0.08)' 
-                      : (hasApproved ? 'rgba(239, 68, 68, 0.03)' : 'rgba(255, 255, 255, 0.02)'), 
-                    padding: '0.6rem 0.8rem', 
-                    borderRadius: '8px', 
-                    border: b.is_approved 
-                      ? '1px solid rgba(16, 185, 129, 0.25)' 
+                <div
+                  key={groupKey}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.35rem',
+                    background: isThisGroupApproved
+                      ? 'rgba(16, 185, 129, 0.08)'
+                      : (hasApproved ? 'rgba(239, 68, 68, 0.03)' : 'rgba(255, 255, 255, 0.02)'),
+                    padding: '0.6rem 0.8rem',
+                    borderRadius: '8px',
+                    border: isThisGroupApproved
+                      ? '1px solid rgba(16, 185, 129, 0.25)'
                       : (hasApproved ? '1px solid rgba(239, 68, 68, 0.15)' : '1px solid rgba(255, 255, 255, 0.05)'),
                     fontSize: '0.85rem',
-                    opacity: (!b.is_approved && hasApproved) ? 0.75 : 1
+                    opacity: (!isThisGroupApproved && hasApproved) ? 0.75 : 1
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
                     <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>
-                      #{idx + 1} {b.is_group ? '👥 Składka' : '👤 Rezerwacja'}
+                      #{idx + 1} {isGroup ? '👥 Składka' : '👤 Rezerwacja'}
                     </span>
-                    {b.is_approved ? (
-                      <span 
-                        className="badge badge-success" 
-                        style={{ 
-                          fontSize: '0.7rem', 
-                          background: 'rgba(16, 185, 129, 0.15)', 
-                          color: '#10b981', 
-                          border: '1px solid rgba(16, 185, 129, 0.2)',
-                          padding: '0.15rem 0.4rem',
-                          borderRadius: '4px'
-                        }}
-                      >
+                    {isThisGroupApproved ? (
+                      <span className="badge badge-success" style={{ fontSize: '0.7rem', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.2)', padding: '0.15rem 0.4rem', borderRadius: '4px' }}>
                         ✓ Polecenie zakupu
                       </span>
                     ) : hasApproved ? (
-                      <span 
-                        className="badge badge-danger" 
-                        style={{ 
-                          fontSize: '0.7rem', 
-                          background: 'rgba(239, 68, 68, 0.15)', 
-                          color: 'var(--accent-red, #ef4444)', 
-                          border: '1px solid rgba(239, 68, 68, 0.2)',
-                          padding: '0.15rem 0.4rem',
-                          borderRadius: '4px'
-                        }}
-                      >
+                      <span className="badge badge-danger" style={{ fontSize: '0.7rem', background: 'rgba(239, 68, 68, 0.15)', color: 'var(--accent-red, #ef4444)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '0.15rem 0.4rem', borderRadius: '4px' }}>
                         ❌ Odrzucona
                       </span>
                     ) : (
-                      <span 
-                        className="badge badge-warning" 
-                        style={{ 
-                          fontSize: '0.7rem', 
-                          background: 'rgba(245, 158, 11, 0.15)', 
-                          color: '#fba524', 
-                          border: '1px solid rgba(245, 158, 11, 0.2)',
-                          padding: '0.15rem 0.4rem',
-                          borderRadius: '4px'
-                        }}
-                      >
+                      <span className="badge badge-warning" style={{ fontSize: '0.7rem', background: 'rgba(245, 158, 11, 0.15)', color: '#fba524', border: '1px solid rgba(245, 158, 11, 0.2)', padding: '0.15rem 0.4rem', borderRadius: '4px' }}>
                         ⏳ W kolejce
                       </span>
                     )}
                   </div>
-                  
+
                   <div style={{ color: 'white', fontWeight: 500 }}>
-                    Rezerwujący: <strong style={{ color: 'var(--text-primary)' }}>{isMyBooking ? 'Ty' : displayName}</strong>
+                    {isGroup ? (
+                      <>{isThisGroupApproved ? 'Kupują' : 'Rezerwują'}: <strong style={{ color: 'var(--text-primary)' }}>{memberNames.join(', ')}</strong></>
+                    ) : (
+                      <>{isThisGroupApproved ? 'Kupuje' : 'Rezerwuje'}: <strong style={{ color: 'var(--text-primary)' }}>{memberNames[0]}</strong></>
+                    )}
                   </div>
 
-                  {!b.is_approved && hasApproved && (
+                  {!isThisGroupApproved && hasApproved && (
                     <div style={{ fontSize: '0.75rem', color: 'var(--accent-red, #fca5a5)', fontStyle: 'italic' }}>
                       Organizator zatwierdził rezerwację przez: {approvedBooking ? (profiles[approvedBooking.user_id]?.display_name || 'innego uczestnika') : 'innego uczestnika'}
                     </div>
                   )}
 
-                  {/* Actions for this specific booking item */}
+                  {/* Actions for this booking group */}
                   <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
                     {isOrganizer && (
                       <>
-                        {b.is_approved ? (
-                          <button 
-                            className="btn btn-secondary" 
-                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#ef4444' }} 
-                            onClick={() => handleToggleApproveBooking(b.id, false)}
+                        {isThisGroupApproved ? (
+                          <button
+                            className="btn btn-secondary"
+                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#ef4444' }}
+                            onClick={() => handleToggleApproveBooking(groupBookings[0].id, false)}
                           >
                             🔄 Cofnij zatwierdzenie
                           </button>
                         ) : (
                           !hasApproved && (
-                            <button 
-                              className="btn btn-primary" 
-                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', background: '#10b981', borderColor: '#10b981' }} 
-                              onClick={() => handleToggleApproveBooking(b.id, true)}
+                            <button
+                              className="btn btn-primary"
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', background: '#10b981', borderColor: '#10b981' }}
+                              onClick={() => handleToggleApproveBooking(groupBookings[0].id, true)}
                             >
                               ✅ Zatwierdź rezerwację
                             </button>
@@ -1515,21 +1506,21 @@ function App() {
                       </>
                     )}
 
-                    {isMyBooking && (
-                      <button 
-                        className="btn btn-secondary" 
-                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }} 
+                    {isMyGroup && (
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
                         onClick={() => handleUnbook(item.id, isSurprise)}
                       >
-                        {b.is_approved ? 'Anuluj rezerwację' : (b.is_group ? 'Opuść składkę' : 'Anuluj rezerwację')}
+                        {isThisGroupApproved ? 'Anuluj zakup' : (isGroup ? 'Opuść składkę' : 'Anuluj rezerwację')}
                       </button>
                     )}
 
-                    {b.is_group && !hasApproved && !hasMyBooking && b.group_id && (
-                      <button 
-                        className="btn btn-primary" 
-                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', background: 'var(--primary)', borderColor: 'var(--primary)' }} 
-                        onClick={() => handleJoinGroup(item.id, b.group_id!, isSurprise)}
+                    {isGroup && !hasApproved && !hasMyBooking && groupBookings[0].group_id && (
+                      <button
+                        className="btn btn-primary"
+                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', background: 'var(--primary)', borderColor: 'var(--primary)' }}
+                        onClick={() => handleJoinGroup(item.id, groupBookings[0].group_id!, isSurprise)}
                       >
                         👥 Dołącz do składki
                       </button>
@@ -1644,7 +1635,7 @@ function App() {
                   }}
                 >
                   <td data-label={isSurprise ? 'Niespodzianka' : 'Prezent'} style={{ fontWeight: 500, color: isApprovedByMe ? '#fbbf24' : 'inherit' }}>
-                    {gift.name} {isBoughtBySomeoneElse && <span style={{ fontSize: '0.75rem', fontWeight: 'normal', fontStyle: 'italic', marginLeft: '0.4rem', color: 'var(--text-secondary)' }}>(Rezerwuje: {approvedBuyerName})</span>}
+                    {gift.name} {isBoughtBySomeoneElse && <span style={{ fontSize: '0.75rem', fontWeight: 'normal', fontStyle: 'italic', marginLeft: '0.4rem', color: 'var(--text-secondary)' }}>(Kupuje: {approvedBuyerName})</span>}
                   </td>
                   {isSurprise && (
                     <td data-label="Zaproponował" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
@@ -2090,6 +2081,7 @@ function App() {
                             <th>Wydarzenie</th>
                             <th>Data</th>
                             <th>Cena</th>
+                            <th>Typ</th>
                             <th>Status</th>
                             <th style={{ textAlign: 'right' }}>Akcje</th>
                           </tr>
@@ -2117,6 +2109,20 @@ function App() {
                                 </td>
                                 <td data-label="Cena">
                                   {gift.price ? `${gift.price} zł` : '—'}
+                                </td>
+                                <td data-label="Typ">
+                                  {(() => {
+                                    if (!b.is_group) return <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>👤 Samodzielnie</span>;
+                                    const groupMembers = bookings
+                                      .filter(bk => bk.group_id === b.group_id)
+                                      .map(bk => profiles[bk.user_id]?.display_name || 'Znajomy')
+                                      .filter(name => name !== (profiles[user?.id]?.display_name || 'Ty'));
+                                    return (
+                                      <span style={{ fontSize: '0.8rem', color: 'var(--primary)' }}>
+                                        👥 Składka{groupMembers.length > 0 ? ` z: ${groupMembers.join(', ')}` : ''}
+                                      </span>
+                                    );
+                                  })()}
                                 </td>
                                 <td data-label="Status">
                                   <span 
@@ -2237,6 +2243,7 @@ function App() {
                             <th>Wydarzenie</th>
                             <th>Pozycja w kolejce</th>
                             <th>Cena</th>
+                            <th>Typ</th>
                             <th>Status</th>
                             <th style={{ textAlign: 'right' }}>Akcje</th>
                           </tr>
@@ -2273,6 +2280,20 @@ function App() {
                                 </td>
                                 <td data-label="Cena">
                                   {gift.price ? `${gift.price} zł` : '—'}
+                                </td>
+                                <td data-label="Typ">
+                                  {(() => {
+                                    if (!b.is_group) return <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>👤 Samodzielnie</span>;
+                                    const groupMembers = bookings
+                                      .filter(bk => bk.group_id === b.group_id)
+                                      .map(bk => profiles[bk.user_id]?.display_name || 'Znajomy')
+                                      .filter(name => name !== (profiles[user?.id]?.display_name || 'Ty'));
+                                    return (
+                                      <span style={{ fontSize: '0.8rem', color: 'var(--primary)' }}>
+                                        👥 Składka{groupMembers.length > 0 ? ` z: ${groupMembers.join(', ')}` : ''}
+                                      </span>
+                                    );
+                                  })()}
                                 </td>
                                 <td data-label="Status">
                                   <span 
