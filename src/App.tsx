@@ -1128,13 +1128,14 @@ function App() {
   };
 
   // Render list of gifts in a compact table view
-  const renderGiftsTable = (giftsList: Gift[]) => {
+  const renderGiftsTable = (giftsList: Gift[], isSurprise: boolean = false) => {
     return (
       <div className="table-responsive">
         <table className="compact-table">
           <thead>
             <tr>
               <th>Prezent</th>
+              {isSurprise && <th>Zaproponował</th>}
               <th>Cena</th>
               <th style={{ textAlign: 'right' }}>
                 <span className="hide-mobile">Szczegóły</span>
@@ -1147,6 +1148,11 @@ function App() {
               const giftBookings = bookings.filter(b => b.gift_id === gift.id);
               const approvedBooking = giftBookings.find(b => b.is_approved);
               const isBoughtBySomeoneElse = !isOwnerActiveOccasion && approvedBooking && approvedBooking.user_id !== user?.id;
+              const approvedBuyerName = approvedBooking 
+                ? (profiles[approvedBooking.user_id]?.display_name || 'Znajomy')
+                : 'Ktoś inny';
+
+              const suggestedByName = profiles[gift.suggested_by || '']?.display_name || 'Solenizant';
 
               return (
                 <tr 
@@ -1158,9 +1164,14 @@ function App() {
                     color: 'var(--text-secondary)'
                   } : undefined}
                 >
-                  <td data-label="Prezent" style={{ fontWeight: 500, textDecoration: isBoughtBySomeoneElse ? 'line-through' : 'none' }}>
-                    {gift.name} {isBoughtBySomeoneElse && <span style={{ fontSize: '0.75rem', fontWeight: 'normal', fontStyle: 'italic', marginLeft: '0.4rem', color: 'var(--accent-red, #ef4444)' }}>(Kupuje ktoś inny)</span>}
+                  <td data-label="Prezent" style={{ fontWeight: 500 }}>
+                    {gift.name} {isBoughtBySomeoneElse && <span style={{ fontSize: '0.75rem', fontWeight: 'normal', fontStyle: 'italic', marginLeft: '0.4rem', color: 'var(--text-secondary)' }}>(Kupuje: {approvedBuyerName})</span>}
                   </td>
+                  {isSurprise && (
+                    <td data-label="Zaproponował" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                      👤 {suggestedByName}
+                    </td>
+                  )}
                   <td data-label="Cena" style={{ whiteSpace: 'nowrap' }}>
                     {gift.price ? <strong style={{ color: isBoughtBySomeoneElse ? 'var(--text-secondary)' : 'var(--text-primary)' }}>{gift.price} zł</strong> : <span style={{ color: 'var(--text-secondary)' }}>—</span>}
                   </td>
@@ -1192,6 +1203,9 @@ function App() {
     const giftBookings = bookings.filter(b => b.gift_id === gift.id);
     const approvedBooking = giftBookings.find(b => b.is_approved);
     const isBoughtBySomeoneElse = !isOwnerActiveOccasion && approvedBooking && approvedBooking.user_id !== user?.id;
+    const approvedBuyerName = approvedBooking 
+      ? (profiles[approvedBooking.user_id]?.display_name || 'Znajomy')
+      : 'Ktoś inny';
 
     return (
       <div 
@@ -1210,7 +1224,9 @@ function App() {
       >
         {isGuestTab ? (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', paddingRight: (isGiftCreator || activeOccasion?.creator_id === user?.id) ? '40px' : '0' }}>
-            <h3 style={{ margin: 0, textDecoration: isBoughtBySomeoneElse ? 'line-through' : 'none' }}>{gift.name}</h3>
+            <h3 style={{ margin: 0 }}>
+              {gift.name} {isBoughtBySomeoneElse && <span style={{ fontSize: '0.8rem', fontWeight: 'normal', fontStyle: 'italic', color: 'var(--text-secondary)' }}>(Kupuje: {approvedBuyerName})</span>}
+            </h3>
             <div className="vote-section" style={{ flexShrink: 0 }}>
               <button 
                 className={`btn ${userVoted ? 'btn-primary' : 'btn-secondary'}`} 
@@ -1223,7 +1239,9 @@ function App() {
             </div>
           </div>
         ) : (
-          <h3 style={{ textDecoration: isBoughtBySomeoneElse ? 'line-through' : 'none' }}>{gift.name}</h3>
+          <h3>
+            {gift.name} {isBoughtBySomeoneElse && <span style={{ fontSize: '0.8rem', fontWeight: 'normal', fontStyle: 'italic', color: 'var(--text-secondary)' }}>(Kupuje: {approvedBuyerName})</span>}
+          </h3>
         )}
 
         {gift.description && <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>{gift.description}</p>}
@@ -2348,7 +2366,7 @@ function App() {
                     </div>
                   ) : (
                     giftsView === 'table' ? (
-                      renderGiftsTable(sortedGoscieGifts)
+                      renderGiftsTable(sortedGoscieGifts, true)
                     ) : (
                       <div className="gifts-grid">
                         {sortedGoscieGifts.map(gift => renderGiftCard(gift, true))}
