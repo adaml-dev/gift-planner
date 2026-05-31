@@ -6,7 +6,7 @@ let commitHash = 'dev';
 let commitDate = '';
 
 try {
-  commitHash = execSync('git rev-parse --short HEAD').toString().trim();
+  commitHash = execSync('git rev-list --count HEAD').toString().trim();
   commitDate = execSync('git log -1 --format="%cd" --date=format:"%Y-%m-%d %H:%M:%S"').toString().trim();
 } catch (e) {
   console.warn('Could not read git commit info:', e);

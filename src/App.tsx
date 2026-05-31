@@ -1144,13 +1144,25 @@ function App() {
           </thead>
           <tbody>
             {giftsList.map(gift => {
+              const giftBookings = bookings.filter(b => b.gift_id === gift.id);
+              const approvedBooking = giftBookings.find(b => b.is_approved);
+              const isBoughtBySomeoneElse = !isOwnerActiveOccasion && approvedBooking && approvedBooking.user_id !== user?.id;
+
               return (
-                <tr key={gift.id}>
-                  <td data-label="Prezent" style={{ fontWeight: 500 }}>
-                    {gift.name}
+                <tr 
+                  key={gift.id} 
+                  style={isBoughtBySomeoneElse ? { 
+                    opacity: 0.55, 
+                    filter: 'grayscale(100%)', 
+                    background: 'rgba(255, 255, 255, 0.01)',
+                    color: 'var(--text-secondary)'
+                  } : undefined}
+                >
+                  <td data-label="Prezent" style={{ fontWeight: 500, textDecoration: isBoughtBySomeoneElse ? 'line-through' : 'none' }}>
+                    {gift.name} {isBoughtBySomeoneElse && <span style={{ fontSize: '0.75rem', fontWeight: 'normal', fontStyle: 'italic', marginLeft: '0.4rem', color: 'var(--accent-red, #ef4444)' }}>(Kupuje ktoś inny)</span>}
                   </td>
                   <td data-label="Cena" style={{ whiteSpace: 'nowrap' }}>
-                    {gift.price ? <strong style={{ color: 'var(--text-primary)' }}>{gift.price} zł</strong> : <span style={{ color: 'var(--text-secondary)' }}>—</span>}
+                    {gift.price ? <strong style={{ color: isBoughtBySomeoneElse ? 'var(--text-secondary)' : 'var(--text-primary)' }}>{gift.price} zł</strong> : <span style={{ color: 'var(--text-secondary)' }}>—</span>}
                   </td>
                   <td data-label="Szczegóły" style={{ textAlign: 'right' }}>
                     <button 
@@ -1177,28 +1189,46 @@ function App() {
     const votesCount = getVoteCount(gift.id);
     const userVoted = hasUserVoted(gift.id);
 
+    const giftBookings = bookings.filter(b => b.gift_id === gift.id);
+    const approvedBooking = giftBookings.find(b => b.is_approved);
+    const isBoughtBySomeoneElse = !isOwnerActiveOccasion && approvedBooking && approvedBooking.user_id !== user?.id;
+
     return (
-      <div key={gift.id} className="glass-panel gift-card" style={{ position: 'relative' }}>
+      <div 
+        key={gift.id} 
+        className="glass-panel gift-card" 
+        style={{ 
+          position: 'relative',
+          ...(isBoughtBySomeoneElse ? {
+            opacity: 0.55,
+            filter: 'grayscale(100%)',
+            background: 'rgba(0, 0, 0, 0.15)',
+            borderColor: 'rgba(255, 255, 255, 0.02)',
+            color: 'var(--text-secondary)'
+          } : {})
+        }}
+      >
         {isGuestTab ? (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', paddingRight: (isGiftCreator || activeOccasion?.creator_id === user?.id) ? '40px' : '0' }}>
-            <h3 style={{ margin: 0 }}>{gift.name}</h3>
+            <h3 style={{ margin: 0, textDecoration: isBoughtBySomeoneElse ? 'line-through' : 'none' }}>{gift.name}</h3>
             <div className="vote-section" style={{ flexShrink: 0 }}>
               <button 
                 className={`btn ${userVoted ? 'btn-primary' : 'btn-secondary'}`} 
                 style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
                 onClick={() => userVoted ? handleUnvote(gift.id) : handleVote(gift.id)}
+                disabled={isBoughtBySomeoneElse}
               >
                 👍 {votesCount}
               </button>
             </div>
           </div>
         ) : (
-          <h3>{gift.name}</h3>
+          <h3 style={{ textDecoration: isBoughtBySomeoneElse ? 'line-through' : 'none' }}>{gift.name}</h3>
         )}
 
         {gift.description && <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>{gift.description}</p>}
         
-        {gift.price && <div className="gift-price">{gift.price} zł</div>}
+        {gift.price && <div className="gift-price" style={{ color: isBoughtBySomeoneElse ? 'var(--text-secondary)' : 'inherit' }}>{gift.price} zł</div>}
         
         <div className="gift-meta">
           {gift.urls && gift.urls.length > 0 ? (
@@ -1270,7 +1300,7 @@ function App() {
             <img src={giftBanner} alt="Gift Planner Logo" width="300" height="200" style={{ objectFit: 'cover' }} />
             <h1>Gift Planner</h1>
             <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0.5rem 0', opacity: 0.7 }}>
-              v-{__COMMIT_HASH__} ({__COMMIT_DATE__})
+              v{__COMMIT_HASH__} ({__COMMIT_DATE__})
             </p>
             <p>Wpisz 4-cyfrowy kod PIN, aby uzyskać dostęp do aplikacji rodzinnej.</p>
           </div>
@@ -1313,7 +1343,7 @@ function App() {
             <img src={giftBanner} alt="Gift Planner Logo" width="300" height="200" style={{ objectFit: 'cover' }} />
             <h1>Kim jesteś?</h1>
             <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0.5rem 0', opacity: 0.7 }}>
-              v-{__COMMIT_HASH__} ({__COMMIT_DATE__})
+              v{__COMMIT_HASH__} ({__COMMIT_DATE__})
             </p>
             <p>Wybierz swoje imię z listy, aby wejść do aplikacji.</p>
           </div>
@@ -1365,15 +1395,15 @@ function App() {
                         flexDirection: 'column',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        padding: '1.25rem 0.5rem',
-                        height: '110px',
+                        padding: '0.75rem 0.5rem',
+                        height: '85px',
                         position: 'relative',
                         width: '100%'
                       }}
                       onClick={() => handleSelectProfile(profile)}
                       disabled={authLoading}
                     >
-                      <span style={{ fontSize: '1.8rem', marginBottom: '0.35rem' }}>👤</span>
+                      <span style={{ fontSize: '1.5rem', marginBottom: '0.2rem' }}>👤</span>
                       <span style={{ 
                         fontSize: '0.85rem', 
                         fontWeight: '500', 
@@ -1433,7 +1463,7 @@ function App() {
           <div className="navbar-brand" onClick={() => { setView('dashboard'); setActiveOccasion(null); }} style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', cursor: 'pointer' }}>
             <span style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>🎁 Gift Planner</span>
             <span style={{ fontSize: '0.65rem', fontWeight: 'normal', color: 'var(--text-secondary)', opacity: 0.7 }}>
-              v-{__COMMIT_HASH__} ({__COMMIT_DATE__})
+              v{__COMMIT_HASH__} ({__COMMIT_DATE__})
             </span>
           </div>
           <div className="navbar-user">
@@ -2219,7 +2249,7 @@ function App() {
                   </div>
                 )}
                 <button className="btn btn-primary" onClick={openGiftModal}>
-                  🎁 Dodaj Prezent
+                  {activeTab === 'goscie' ? '🎉 Zaproponuj Niespodziankę' : '🎁 Dodaj Prezent'}
                 </button>
               </div>
             </div>
@@ -2313,7 +2343,7 @@ function App() {
                       <h4>Brak pomysłów gości</h4>
                       <p style={{ marginBottom: '1.5rem' }}>Zaproponuj coś fajnego, o czym solenizant nie wie!</p>
                       <button className="btn btn-primary" onClick={openGiftModal}>
-                        Dodaj pomysł-niespodziankę
+                        Zaproponuj niespodziankę
                       </button>
                     </div>
                   ) : (
