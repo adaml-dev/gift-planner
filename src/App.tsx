@@ -83,7 +83,7 @@ function App() {
   const [initializing, setInitializing] = useState(true);
 
   // App navigation & core state
-  const [view, setView] = useState<'dashboard' | 'occasion' | 'my-bookings'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'occasion' | 'my-bookings' | 'login-logs'>('dashboard');
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [occasions, setOccasions] = useState<Occasion[]>([]);
   const [activeOccasion, setActiveOccasion] = useState<Occasion | null>(null);
@@ -93,6 +93,15 @@ function App() {
   const [allSurprises, setAllSurprises] = useState<any[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [votes, setVotes] = useState<Vote[]>([]);
+
+  interface LoginLog {
+    id: string;
+    user_id: string;
+    login_at: string;
+    logout_at: string | null;
+  }
+  const [loginLogs, setLoginLogs] = useState<LoginLog[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
   
   // Tab control in Occasion view
   const [activeTab, setActiveTab] = useState<'solenizant' | 'goscie' | 'chat'>('solenizant');
@@ -249,6 +258,31 @@ function App() {
       fetchAllGifts();
       fetchAllSurprises();
     }
+  }, [user]);
+
+  // Log login on user auth state change
+  useEffect(() => {
+    const handleLoginLogging = async () => {
+      if (user) {
+        const cachedLogId = sessionStorage.getItem('gp_login_log_id');
+        if (!cachedLogId) {
+          try {
+            const { data, error } = await supabase
+              .from('gp_login_logs')
+              .insert({ user_id: user.id })
+              .select('id')
+              .single();
+            if (!error && data) {
+              sessionStorage.setItem('gp_login_log_id', data.id);
+            }
+          } catch (e) {
+            console.error('Error logging login:', e);
+          }
+        }
+      }
+    };
+
+    handleLoginLogging();
   }, [user]);
 
   // Load lastReadMap on login
@@ -437,6 +471,38 @@ function App() {
     }
   };
 
+  const fetchLoginLogs = async () => {
+    setLoadingLogs(true);
+    try {
+      const { data, error } = await supabase
+        .from('gp_login_logs')
+        .select('*')
+        .order('login_at', { ascending: false });
+      if (!error && data) {
+        setLoginLogs(data);
+      }
+    } catch (e) {
+      console.error('Error fetching login logs:', e);
+    } finally {
+      setLoadingLogs(false);
+    }
+  };
+
+  const logLogout = async () => {
+    const cachedLogId = sessionStorage.getItem('gp_login_log_id');
+    if (cachedLogId && user) {
+      try {
+        await supabase
+          .from('gp_login_logs')
+          .update({ logout_at: new Date().toISOString() })
+          .eq('id', cachedLogId);
+      } catch (e) {
+        console.error('Error logging logout:', e);
+      }
+      sessionStorage.removeItem('gp_login_log_id');
+    }
+  };
+
   // 5. Fetch profiles, occasions, gifts, bookings, votes
   const fetchProfiles = async () => {
     const { data } = await supabase.from('gp_profiles').select('*');
@@ -582,6 +648,7 @@ function App() {
     }
 
     setAuthLoading(true);
+    await logLogout();
     const email = profile.email || `member_${profile.id.substring(0, 8)}@family.local`;
     const password = profile.login_password || `pass_${profile.id.substring(0, 8)}`;
 
@@ -622,6 +689,7 @@ function App() {
 
     setAuthLoading(true);
     setAuthError('');
+    await logLogout();
 
     const { data, error } = await supabase.auth.signInWithPassword({
       email: selectedProfile.email || '',
@@ -754,6 +822,7 @@ function App() {
   };
 
   const handleLogout = async () => {
+    await logLogout();
     await supabase.auth.signOut();
   };
 
@@ -1959,9 +2028,22 @@ function App() {
           </div>
           <div className="navbar-user">
             {isAdmin && (
-              <button className="btn btn-primary" style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }} onClick={() => setShowAddMemberModal(true)}>
-                👤 <span className="hide-mobile">Zarządzaj rodziną</span><span className="show-mobile-inline">Rodzina</span>
-              </button>
+              <>
+                <button className="btn btn-primary" style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }} onClick={() => setShowAddMemberModal(true)}>
+                  👤 <span className="hide-mobile">Zarządzaj rodziną</span><span className="show-mobile-inline">Rodzina</span>
+                </button>
+                <button 
+                  className={`btn ${view === 'login-logs' ? 'btn-primary' : 'btn-secondary'}`} 
+                  style={{ padding: '0.5rem 1rem', fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }} 
+                  onClick={() => {
+                    setView('login-logs');
+                    setActiveOccasion(null);
+                    fetchLoginLogs();
+                  }}
+                >
+                  📋 <span className="hide-mobile">Dziennik logowań</span><span className="show-mobile-inline">Logi</span>
+                </button>
+              </>
             )}
             <span style={{ fontSize: '0.95rem', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: '0.2rem', flexShrink: 0 }}>
               <span className="hide-mobile">Cześć, </span>
@@ -2061,6 +2143,118 @@ function App() {
     <>
       {renderNav()}
       
+      {/* ----------------- LOGIN LOGS VIEW (ADMIN ONLY) ----------------- */}
+      {view === 'login-logs' && (
+        <main className="container">
+          <div className="dashboard-header" style={{ marginBottom: '1.5rem' }}>
+            <div>
+              <button 
+                className="back-link" 
+                style={{ marginBottom: '0.75rem', display: 'block' }} 
+                onClick={() => setView('dashboard')}
+              >
+                ← Powrót do pulpitu
+              </button>
+              <h1>Dziennik logowań użytkowników</h1>
+              <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
+                Historia logowań i wylogowań członków rodziny.
+              </p>
+            </div>
+            <button 
+              className="btn btn-secondary" 
+              onClick={fetchLoginLogs}
+              disabled={loadingLogs}
+              style={{ padding: '0.6rem 1.2rem', fontSize: '0.9rem' }}
+            >
+              🔄 Odśwież logi
+            </button>
+          </div>
+
+          <div className="glass-panel" style={{ padding: '1.5rem', overflowX: 'auto' }}>
+            {loadingLogs ? (
+              <div style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--text-secondary)' }}>
+                Ładowanie dziennika logowań...
+              </div>
+            ) : loginLogs.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--text-secondary)' }}>
+                Brak zapisanych logowań w bazie danych.
+              </div>
+            ) : (
+              <table className="table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                    <th style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)' }}>Użytkownik</th>
+                    <th style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)' }}>Data i godzina logowania</th>
+                    <th style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)' }}>Data i godzina wylogowania</th>
+                    <th style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)' }}>Czas sesji</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loginLogs.map(log => {
+                    const profile = profiles[log.user_id];
+                    const loginDate = new Date(log.login_at);
+                    const logoutDate = log.logout_at ? new Date(log.logout_at) : null;
+                    
+                    let durationText = 'Aktywna sesja';
+                    if (logoutDate) {
+                      const diffMs = logoutDate.getTime() - loginDate.getTime();
+                      const diffMins = Math.floor(diffMs / 60000);
+                      const diffHours = Math.floor(diffMins / 60);
+                      const remainingMins = diffMins % 60;
+                      
+                      if (diffHours > 0) {
+                        durationText = `${diffHours} godz. ${remainingMins} min.`;
+                      } else if (diffMins > 0) {
+                        durationText = `${diffMins} min.`;
+                      } else {
+                        durationText = 'Krótka sesja (< 1 min)';
+                      }
+                    }
+
+                    const formatDateTime = (date: Date) => {
+                      return date.toLocaleString('pl-PL', {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                      });
+                    };
+
+                    return (
+                      <tr 
+                        key={log.id} 
+                        style={{ 
+                          borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                          transition: 'background 0.2s'
+                        }}
+                        className="table-row-hover"
+                      >
+                        <td style={{ padding: '1rem', fontWeight: '500' }}>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            👤 {profile?.display_name || 'Nieznany użytkownik'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '1rem', color: 'var(--text-primary)' }}>
+                          📅 {formatDateTime(loginDate)}
+                        </td>
+                        <td style={{ padding: '1rem', color: log.logout_at ? 'var(--text-primary)' : 'var(--success, #10b981)' }}>
+                          {log.logout_at ? `🚪 ${formatDateTime(logoutDate!)}` : '🟢 Aktywna (lub zamknięta karta)'}
+                        </td>
+                        <td style={{ padding: '1rem', color: 'var(--text-secondary)' }}>
+                          ⏱️ {durationText}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </main>
+      )}
+
       {/* ----------------- MY RESERVATIONS VIEW ----------------- */}
       {view === 'my-bookings' && (
         <main className="container">
