@@ -119,6 +119,8 @@ function App() {
   const [newGiftPrice, setNewGiftPrice] = useState('');
   const [giftVariants, setGiftVariants] = useState<{ label: string; url: string }[]>([{ label: '', url: '' }]);
   const [newAppPin, setNewAppPin] = useState('');
+  const [autofillUrl, setAutofillUrl] = useState('');
+  const [scraping, setScraping] = useState(false);
 
   // General loading & message states
   const [loading, setLoading] = useState(false);
@@ -969,6 +971,8 @@ function App() {
     setNewGiftDesc('');
     setNewGiftPrice('');
     setGiftVariants([{ label: '', url: '' }]);
+    setAutofillUrl('');
+    setScraping(false);
     setShowGiftModal(true);
   };
 
@@ -979,9 +983,42 @@ function App() {
     setNewGiftDesc(item.description || '');
     setNewGiftPrice(item.price ? item.price.toString() : '');
     setGiftVariants(item.urls && item.urls.length > 0 ? item.urls : [{ label: '', url: '' }]);
+    setAutofillUrl('');
+    setScraping(false);
     setActiveGiftDetails(null);
     setActiveSurpriseDetails(null);
     setShowGiftModal(true);
+  };
+
+  const handleAutofillFromUrl = async () => {
+    if (!autofillUrl.trim()) return;
+    setScraping(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('scrape-product', {
+        body: { url: autofillUrl.trim() }
+      });
+
+      if (error) {
+        throw new Error(error.message || 'Nie udało się pobrać danych produktu');
+      }
+
+      if (data) {
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        if (data.name) setNewGiftName(data.name);
+        if (data.description) setNewGiftDesc(data.description);
+        if (data.price && !giftModalIsSurprise) setNewGiftPrice(data.price);
+        
+        const host = data.shopName || 'Sklep';
+        setGiftVariants([{ label: host, url: autofillUrl.trim() }]);
+        setToast({ message: 'Udało się pobrać dane produktu!', type: 'success' });
+      }
+    } catch (err: any) {
+      setToast({ message: 'Błąd pobierania danych: ' + err.message, type: 'error' });
+    } finally {
+      setScraping(false);
+    }
   };
 
   // Add or Edit Gift/Surprise logic
@@ -3335,6 +3372,33 @@ function App() {
             </div>
 
             <form onSubmit={handleSaveGift}>
+              {!editingGift && (
+                <div className="form-group autofill-section" style={{ borderBottom: '1px solid var(--border)', paddingBottom: '1rem', marginBottom: '1rem' }}>
+                  <label style={{ fontWeight: 600, color: 'var(--primary)' }}>Szybkie dodawanie z linku (Autouzupełnianie)</label>
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
+                    <input 
+                      type="url" 
+                      className="form-control" 
+                      placeholder="Wklej link do sklepu (np. Allegro, Amazon, itp.)"
+                      value={autofillUrl}
+                      onChange={e => setAutofillUrl(e.target.value)}
+                    />
+                    <button 
+                      type="button" 
+                      className="btn btn-secondary" 
+                      style={{ flexShrink: 0 }}
+                      onClick={handleAutofillFromUrl}
+                      disabled={scraping || !autofillUrl.trim()}
+                    >
+                      {scraping ? 'Uzupełnianie...' : 'Uzupełnij'}
+                    </button>
+                  </div>
+                  <small style={{ color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block', fontSize: '0.8rem' }}>
+                    Automatycznie pobierze nazwę, cenę, krótki opis i doda link do wariantów.
+                  </small>
+                </div>
+              )}
+
               <div className="form-group">
                 <label>{giftModalIsSurprise ? 'Nazwa niespodzianki *' : 'Nazwa prezentu *'}</label>
                 <input 
