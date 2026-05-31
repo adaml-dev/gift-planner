@@ -15,6 +15,34 @@ function extractHostname(url: string): string {
   }
 }
 
+function getGoogleTranslateProxyUrl(originalUrl: string): string {
+  try {
+    const parsed = new URL(originalUrl);
+    const hostWithDashes = parsed.hostname.replace(/\./g, '-');
+    const proxyHost = `${hostWithDashes}.translate.goog`;
+    const proxyUrl = new URL(parsed.pathname + parsed.search, `https://${proxyHost}`);
+    proxyUrl.searchParams.set('_x_tr_sl', 'auto');
+    proxyUrl.searchParams.set('_x_tr_tl', 'pl');
+    proxyUrl.searchParams.set('_x_tr_hl', 'pl');
+    return proxyUrl.toString();
+  } catch {
+    return originalUrl;
+  }
+}
+
+async function doFetch(targetUrl: string): Promise<Response> {
+  return await fetch(targetUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Cache-Control': 'no-cache',
+    },
+    redirect: 'follow',
+    signal: AbortSignal.timeout(10000),
+  });
+}
+
 function cleanPrice(raw: string | undefined | null): string | null {
   if (!raw) return null;
   // Remove currency symbols, spaces, keep digits and decimal separator
@@ -144,19 +172,28 @@ serve(async (req) => {
     }
 
     const shopName = extractHostname(url);
+    const isEmpik = shopName.endsWith('empik.com');
+    let fetchUrl = parsedUrl.toString();
+    
+    if (isEmpik) {
+      fetchUrl = getGoogleTranslateProxyUrl(fetchUrl);
+    }
 
-    // Fetch the page with browser-like headers
-    const response = await fetch(parsedUrl.toString(), {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Cache-Control': 'no-cache',
-      },
-      redirect: 'follow',
-      signal: AbortSignal.timeout(10000),
-    });
+    let response: Response;
+    try {
+      response = await doFetch(fetchUrl);
+      if (!response.ok && !isEmpik) {
+        const proxyUrl = getGoogleTranslateProxyUrl(parsedUrl.toString());
+        response = await doFetch(proxyUrl);
+      }
+    } catch (err) {
+      if (!isEmpik) {
+        const proxyUrl = getGoogleTranslateProxyUrl(parsedUrl.toString());
+        response = await doFetch(proxyUrl);
+      } else {
+        throw err;
+      }
+    }
 
     if (!response.ok) {
       return new Response(JSON.stringify({ error: `Failed to fetch URL: ${response.status}` }), {

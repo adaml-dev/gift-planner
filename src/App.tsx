@@ -1649,6 +1649,7 @@ function App() {
               const bookersText = bookersCount > 0 ? `${bookersCount} (${bookersList})` : '—';
               
               const chatStats = getGiftChatStats(gift.id, isSurprise);
+              const firstUrl = gift.urls && gift.urls.length > 0 && gift.urls[0].url ? gift.urls[0].url : gift.url;
 
               return (
                 <tr 
@@ -1672,7 +1673,23 @@ function App() {
                   }}
                 >
                   <td data-label={isSurprise ? 'Niespodzianka' : 'Prezent'} style={{ fontWeight: 500, color: isApprovedByMe ? '#fbbf24' : 'inherit' }}>
-                    {gift.name} {isBoughtBySomeoneElse && <span style={{ fontSize: '0.75rem', fontWeight: 'normal', fontStyle: 'italic', marginLeft: '0.4rem', color: 'var(--text-secondary)' }}>(Kupuje: {approvedBuyerName})</span>}
+                    {firstUrl ? (
+                      <a 
+                        href={firstUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        onClick={(e) => e.stopPropagation()} 
+                        style={{ 
+                          color: isApprovedByMe ? '#fbbf24' : 'var(--primary)', 
+                          textDecoration: 'underline' 
+                        }}
+                      >
+                        {gift.name}
+                      </a>
+                    ) : (
+                      gift.name
+                    )}{' '}
+                    {isBoughtBySomeoneElse && <span style={{ fontSize: '0.75rem', fontWeight: 'normal', fontStyle: 'italic', marginLeft: '0.4rem', color: 'var(--text-secondary)' }}>(Kupuje: {approvedBuyerName})</span>}
                   </td>
                   {isSurprise && (
                     <td data-label="Zaproponował" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
