@@ -121,6 +121,7 @@ function App() {
   const [newAppPin, setNewAppPin] = useState('');
   const [autofillUrl, setAutofillUrl] = useState('');
   const [scraping, setScraping] = useState(false);
+  const [cameFromTab, setCameFromTab] = useState<'solenizant' | 'goscie' | null>(null);
 
   // General loading & message states
   const [loading, setLoading] = useState(false);
@@ -1727,6 +1728,9 @@ function App() {
                   )}
                   <td data-label="Czat" onClick={(e) => {
                     e.stopPropagation();
+                    if (activeTab !== 'chat') {
+                      setCameFromTab(activeTab);
+                    }
                     setChatFilter(isSurprise ? `surprise:${gift.id}` : `gift:${gift.id}`);
                     setActiveTab('chat');
                     updateLastRead(isSurprise ? `surprise:${gift.id}` : `gift:${gift.id}`);
@@ -2785,7 +2789,13 @@ function App() {
                   <span className="hide-mobile">Pomysły i niespodzianki gości</span>
                   <span className="show-mobile-inline">Niespodzianki</span> ({goscieGifts.length})
                 </button>
-                <button className={`tab-btn ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>
+                <button 
+                  className={`tab-btn ${activeTab === 'chat' ? 'active' : ''}`} 
+                  onClick={() => {
+                    setChatFilter('all');
+                    setActiveTab('chat');
+                  }}
+                >
                   💬 <span className="hide-mobile">Czat i dyskusja</span>
                   <span className="show-mobile-inline">Czat</span>
                 </button>
@@ -2877,6 +2887,28 @@ function App() {
                         )}
                       </select>
                     </div>
+
+                    {/* Back to List button */}
+                    {chatFilter !== 'all' && chatFilter !== 'general' && (
+                      <button 
+                        className="btn btn-secondary" 
+                        style={{ 
+                          display: 'inline-flex', 
+                          alignItems: 'center', 
+                          gap: '0.4rem', 
+                          padding: '0.5rem 1.25rem', 
+                          fontSize: '0.9rem',
+                          height: '40px',
+                          marginTop: '1.25rem',
+                          fontWeight: 500
+                        }}
+                        onClick={() => {
+                          setActiveTab(cameFromTab || (chatFilter.startsWith('surprise:') ? 'goscie' : 'solenizant'));
+                        }}
+                      >
+                        ← Wróć do listy
+                      </button>
+                    )}
 
                     {/* Search Field / Toggle Button */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
