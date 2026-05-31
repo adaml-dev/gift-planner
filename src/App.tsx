@@ -1104,7 +1104,7 @@ function App() {
         setToast({ message: 'Błąd rezerwacji grupowej: ' + error.message, type: 'error' });
       } else if (activeOccasion) {
         fetchBookings(activeOccasion.id);
-        setToast({ message: additionalUserIds.length > 0 ? 'Utworzono składkę grupową ze wskazanymi uczestnikami!' : 'Dołączono do składki grupowej!', type: 'success' });
+        setToast({ message: additionalUserIds.length > 0 ? 'Utworzono składkę grupową ze wskazanymi uczestnikami!' : 'Składka grupowa została zorganizowana!', type: 'success' });
       }
     } else {
       const insertData: any = { 
@@ -1128,6 +1128,33 @@ function App() {
         fetchBookings(activeOccasion.id);
         setToast({ message: 'Zarezerwowano prezent!', type: 'success' });
       }
+    }
+  };
+
+  // Join existing group booking (składka)
+  const handleJoinGroup = async (itemId: string, groupId: string, isSurprise: boolean = false) => {
+    if (!groupId) {
+      setToast({ message: 'Brak identyfikatora składki, nie można dołączyć.', type: 'error' });
+      return;
+    }
+    const insertData: any = {
+      user_id: user.id,
+      is_group: true,
+      group_id: groupId,
+    };
+    if (isSurprise) {
+      insertData.surprise_id = itemId;
+    } else {
+      insertData.gift_id = itemId;
+    }
+    const { error } = await supabase
+      .from('gp_bookings')
+      .insert(insertData);
+    if (error) {
+      setToast({ message: 'Błąd dołączania do składki: ' + error.message, type: 'error' });
+    } else if (activeOccasion) {
+      fetchBookings(activeOccasion.id);
+      setToast({ message: 'Dołączono do składki grupowej!', type: 'success' });
     }
   };
 
@@ -1498,11 +1525,11 @@ function App() {
                       </button>
                     )}
 
-                    {b.is_group && !hasApproved && !hasMyBooking && (
+                    {b.is_group && !hasApproved && !hasMyBooking && b.group_id && (
                       <button 
                         className="btn btn-primary" 
                         style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', background: 'var(--primary)', borderColor: 'var(--primary)' }} 
-                        onClick={() => handleBook(item.id, true, b.group_id, isSurprise)}
+                        onClick={() => handleJoinGroup(item.id, b.group_id!, isSurprise)}
                       >
                         👥 Dołącz do składki
                       </button>
@@ -2636,28 +2663,28 @@ function App() {
               </div>
               <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
                 {activeOccasion.creator_id === user.id && (
-                  <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', overflow: 'hidden', maxWidth: '100%' }}>
                     {activeOccasion.is_draft && (
                       <button 
                         className="btn btn-secondary" 
-                        style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem', border: '1px solid var(--accent-green)', color: 'var(--accent-green)' }} 
+                        style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem', border: '1px solid var(--accent-green)', color: 'var(--accent-green)', flexShrink: 0 }} 
                         onClick={() => handleApproveOccasion(activeOccasion.id, false)}
                       >
                         ✅ Zatwierdź
                       </button>
                     )}
-                    <button className="btn btn-secondary" style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem' }} onClick={() => startEditOccasion(activeOccasion)}>
+                    <button className="btn btn-secondary" style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem', flexShrink: 0 }} onClick={() => startEditOccasion(activeOccasion)}>
                       ✏️ Edytuj
                     </button>
-                    <button className="btn btn-secondary" style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem' }} onClick={() => handleToggleArchiveOccasion(activeOccasion)}>
+                    <button className="btn btn-secondary" style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem', flexShrink: 0 }} onClick={() => handleToggleArchiveOccasion(activeOccasion)}>
                       {activeOccasion.is_archived ? '🗄️ Przywróć' : '🗄️ Zarchiwizuj'}
                     </button>
-                    <button className="btn btn-danger btn-secondary" style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem' }} onClick={(e) => handleDeleteOccasion(activeOccasion.id, e)}>
+                    <button className="btn btn-danger btn-secondary" style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem', flexShrink: 0 }} onClick={(e) => handleDeleteOccasion(activeOccasion.id, e)}>
                       🗑️ Usuń
                     </button>
                   </div>
                 )}
-                <button className="btn btn-primary" onClick={() => openGiftModal(activeTab === 'goscie')}>
+                <button className="btn btn-primary" style={{ flexShrink: 0 }} onClick={() => openGiftModal(activeTab === 'goscie')}>
                   {activeTab === 'goscie' ? '🎉 Zaproponuj Niespodziankę' : '🎁 Dodaj Prezent'}
                 </button>
               </div>
@@ -3031,7 +3058,7 @@ function App() {
       {/* ----------------- ADD OCCASION MODAL ----------------- */}
       {showOccasionModal && (
         <div className="modal-overlay">
-          <div className="glass-panel modal-content">
+          <div className="glass-panel modal-content" style={{ maxHeight: '90vh', overflowY: 'auto' }}>
             <div className="modal-header">
               <h2>{editingOccasion ? 'Edytuj wydarzenie' : 'Dodaj nowe wydarzenie'}</h2>
               <button className="close-btn" onClick={closeOccasionModal}>×</button>
@@ -3614,10 +3641,11 @@ function App() {
                 </div>
               </div>
             </div>
-            <div className="modal-actions">
+            <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', marginTop: '1.5rem', alignItems: 'center' }}>
               <button 
                 type="button" 
                 className="btn btn-secondary" 
+                style={{ flexShrink: 0 }}
                 onClick={() => setActiveOccasionDetails(null)}
               >
                 Zamknij
@@ -3625,6 +3653,7 @@ function App() {
               <button 
                 type="button" 
                 className="btn btn-primary" 
+                style={{ flexShrink: 0 }}
                 onClick={() => {
                   selectOccasion(activeOccasionDetails);
                   setActiveOccasionDetails(null);
@@ -3632,13 +3661,13 @@ function App() {
               >
                 Wejdź do środka
               </button>
-               {activeOccasionDetails.creator_id === user?.id && (
+              {activeOccasionDetails.creator_id === user?.id && (
                 <>
                   {activeOccasionDetails.is_draft && (
                     <button 
                       type="button" 
                       className="btn btn-secondary" 
-                      style={{ border: '1px solid var(--accent-green)', color: 'var(--accent-green)' }}
+                      style={{ border: '1px solid var(--accent-green)', color: 'var(--accent-green)', flexShrink: 0 }}
                       onClick={() => handleApproveOccasion(activeOccasionDetails.id, true)}
                     >
                       ✅ Zatwierdź
@@ -3647,6 +3676,7 @@ function App() {
                   <button 
                     type="button" 
                     className="btn btn-secondary" 
+                    style={{ flexShrink: 0 }}
                     onClick={() => {
                       startEditOccasion(activeOccasionDetails);
                       setActiveOccasionDetails(null);
@@ -3657,6 +3687,7 @@ function App() {
                   <button 
                     type="button" 
                     className="btn btn-secondary" 
+                    style={{ flexShrink: 0 }}
                     onClick={() => {
                       handleToggleArchiveOccasion(activeOccasionDetails);
                     }}
@@ -3666,6 +3697,7 @@ function App() {
                   <button 
                     type="button" 
                     className="btn btn-danger btn-secondary" 
+                    style={{ flexShrink: 0 }}
                     onClick={(e) => {
                       handleDeleteOccasion(activeOccasionDetails.id, e);
                       setActiveOccasionDetails(null);
@@ -3680,7 +3712,6 @@ function App() {
         </div>
       )}
 
-      {/* ----------------- GIFT DETAILS MODAL ----------------- */}
       {/* ----------------- GIFT DETAILS MODAL ----------------- */}
       {activeGiftDetails && (
         <div className="modal-overlay" style={{ zIndex: 1900 }}>
