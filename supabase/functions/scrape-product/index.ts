@@ -30,6 +30,45 @@ function getGoogleTranslateProxyUrl(originalUrl: string): string {
   }
 }
 
+function extractAllegroOfferId(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    const match = parsed.pathname.match(/-(\d+)(?:\/)?$/) || parsed.pathname.match(/\/(\d+)(?:\/)?$/);
+    if (match) return match[1];
+    
+    const idParam = parsed.searchParams.get('id') || parsed.searchParams.get('item');
+    if (idParam && /^\d+$/.test(idParam)) return idParam;
+    
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function cleanTitle(title: string): string {
+  if (!title) return '';
+  return title
+    .replace(/^Kup teraz na Allegro\.pl\s+za\s+[\d\s,.]+\s*(?:zł|PLN)\s*-\s*/i, '')
+    .replace(/^Kup teraz za\s+[\d\s,.]+\s*(?:zł|PLN)\s*-\s*/i, '')
+    .replace(/\s*[\.-]\s*Allegro\.pl.*$/i, '')
+    .replace(/\s*\|\s*Allegro\.pl.*$/i, '')
+    .replace(/\s*\(\d+\)$/, '')
+    .trim();
+}
+
+function getSlugName(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const parts = parsed.pathname.split('/');
+    let last = parts[parts.length - 1] || parts[parts.length - 2] || '';
+    last = last.replace(/-?\d+$/, '');
+    const words = last.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ').trim();
+    return words || 'Allegro Przedmiot';
+  } catch {
+    return 'Allegro Przedmiot';
+  }
+}
+
 async function doFetch(targetUrl: string): Promise<Response> {
   return await fetch(targetUrl, {
     headers: {
@@ -175,6 +214,108 @@ serve(async (req) => {
 
     const shopName = extractHostname(url);
     const isEmpik = shopName.endsWith('empik.com');
+    const isAllegro = shopName.endsWith('allegro.pl');
+
+    if (isAllegro) {
+      const offerId = extractAllegroOfferId(url);
+      if (!offerId) {
+        return new Response(JSON.stringify({
+          name: getSlugName(url),
+          description: 'Przedmiot z Allegro',
+          price: null,
+          imageUrl: null,
+          shopName,
+          originalUrl: url,
+        }), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      try {
+        const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(offerId)}`;
+        const ddgRes = await fetch(ddgUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7',
+          },
+          signal: AbortSignal.timeout(6000),
+        });
+
+        if (!ddgRes.ok) {
+          throw new Error(`DDG status: ${ddgRes.status}`);
+        }
+
+        const html = await ddgRes.text();
+        const resultBlockRegex = /<div class="[^"]*result[^"]*">([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/gi;
+        let match;
+        
+        let name = null;
+        let price = null;
+        let firstResultText = null;
+
+        while ((match = resultBlockRegex.exec(html)) !== null) {
+          const block = match[1];
+          const snippetMatch = block.match(/<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/i) ||
+                               block.match(/<div class="result__snippet"[^>]*>([\s\S]*?)<\/div>/i);
+          const titleMatch = block.match(/<a class="result__a"[^>]*>([\s\S]*?)<\/a>/i);
+          const textToSearch = (titleMatch ? titleMatch[1] : '') + ' ' + (snippetMatch ? snippetMatch[1] : '');
+          const cleanText = textToSearch.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+          
+          if (!firstResultText) {
+            firstResultText = cleanText;
+          }
+
+          const allegroPattern = /za\s+([\d\s,]+)\s*(?:zł|PLN)\s*-\s*([\s\S]+?)(?:\(\d+\)|\.\s*Allegro|$)/i;
+          const allegroMatch = allegroPattern.exec(cleanText);
+          
+          if (allegroMatch) {
+            const rawPrice = allegroMatch[1];
+            const rawName = allegroMatch[2];
+            price = rawPrice.replace(/[^\d,.]/g, '').replace(',', '.').trim();
+            const num = parseFloat(price);
+            price = isNaN(num) ? null : num.toFixed(2);
+            name = rawName.trim().replace(/\s*\(\d+\)$/, '').trim();
+            break;
+          }
+        }
+
+        if (!name && firstResultText) {
+          name = cleanTitle(firstResultText);
+        }
+        
+        if (!name) {
+          name = getSlugName(url);
+        }
+
+        return new Response(JSON.stringify({
+          name,
+          description: `Oferta Allegro o ID: ${offerId}`,
+          price,
+          imageUrl: null,
+          shopName,
+          originalUrl: url,
+        }), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+
+      } catch (err) {
+        return new Response(JSON.stringify({
+          name: getSlugName(url),
+          description: `Oferta Allegro o ID: ${offerId}`,
+          price: null,
+          imageUrl: null,
+          shopName,
+          originalUrl: url,
+        }), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
     let fetchUrl = parsedUrl.toString();
     
     if (isEmpik) {
