@@ -118,7 +118,6 @@ function App() {
   const [newGiftDesc, setNewGiftDesc] = useState('');
   const [newGiftPrice, setNewGiftPrice] = useState('');
   const [giftVariants, setGiftVariants] = useState<{ label: string; url: string }[]>([{ label: '', url: '' }]);
-  const [newGiftIsSecret, setNewGiftIsSecret] = useState(false);
   const [newAppPin, setNewAppPin] = useState('');
 
   // General loading & message states
@@ -128,7 +127,9 @@ function App() {
   const [bookingModal, setBookingModal] = useState<{ show: boolean; giftId: string; giftName: string; isSurprise?: boolean } | null>(null);
   const [activeOccasionDetails, setActiveOccasionDetails] = useState<Occasion | null>(null);
   const [activeGiftDetails, setActiveGiftDetails] = useState<any | null>(null);
-  const [activeGiftIsSurprise, setActiveGiftIsSurprise] = useState<boolean>(false);
+  const [activeSurpriseDetails, setActiveSurpriseDetails] = useState<any | null>(null);
+  const [giftModalIsSurprise, setGiftModalIsSurprise] = useState(false);
+  const [editingGift, setEditingGift] = useState<any | null>(null);
 
   // Chat states
   const [messages, setMessages] = useState<any[]>([]);
@@ -902,21 +903,35 @@ function App() {
     });
   };
 
-  const openGiftModal = () => {
-    // If they are on the Guests tab and are not the owner, default to secret. Otherwise false.
-    const defaultSecret = (!isOwnerActiveOccasion && activeTab === 'goscie');
-    setNewGiftIsSecret(defaultSecret);
+  const openGiftModal = (isSurprise: boolean) => {
+    setEditingGift(null);
+    setGiftModalIsSurprise(isSurprise);
+    setNewGiftName('');
+    setNewGiftDesc('');
+    setNewGiftPrice('');
+    setGiftVariants([{ label: '', url: '' }]);
     setShowGiftModal(true);
   };
 
-  // Add Gift or Surprise logic
-  const handleCreateGift = async (e: React.FormEvent) => {
+  const startEditGift = (item: any, isSurprise: boolean) => {
+    setEditingGift(item);
+    setGiftModalIsSurprise(isSurprise);
+    setNewGiftName(item.name || '');
+    setNewGiftDesc(item.description || '');
+    setNewGiftPrice(item.price ? item.price.toString() : '');
+    setGiftVariants(item.urls && item.urls.length > 0 ? item.urls : [{ label: '', url: '' }]);
+    setActiveGiftDetails(null);
+    setActiveSurpriseDetails(null);
+    setShowGiftModal(true);
+  };
+
+  // Add or Edit Gift/Surprise logic
+  const handleSaveGift = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newGiftName.trim() || !activeOccasion) return;
 
     setLoading(true);
-    // Use the checkbox value 'newGiftIsSecret' to determine if it is a surprise, provided the user is not the owner.
-    const isSurprise = (!isOwnerActiveOccasion && newGiftIsSecret);
+    const isSurprise = giftModalIsSurprise;
 
     const filteredVariants = giftVariants
       .filter(v => v.url.trim() !== '')
@@ -925,29 +940,39 @@ function App() {
         url: v.url.trim()
       }));
 
-    const insertData: any = {
+    const saveData: any = {
       occasion_id: activeOccasion.id,
       name: newGiftName,
       description: newGiftDesc || null,
       price: isSurprise ? null : (newGiftPrice ? parseFloat(newGiftPrice) : null),
       url: filteredVariants[0]?.url || null,
       urls: filteredVariants,
-      suggested_by: user.id
+      suggested_by: editingGift ? editingGift.suggested_by : user.id
     };
 
-    const { error } = await supabase
-      .from(isSurprise ? 'gp_surprises' : 'gp_gifts')
-      .insert(insertData);
+    let error = null;
+    if (editingGift) {
+      const { error: updateError } = await supabase
+        .from(isSurprise ? 'gp_surprises' : 'gp_gifts')
+        .update(saveData)
+        .eq('id', editingGift.id);
+      error = updateError;
+    } else {
+      const { error: insertError } = await supabase
+        .from(isSurprise ? 'gp_surprises' : 'gp_gifts')
+        .insert(saveData);
+      error = insertError;
+    }
 
     if (error) {
-      setToast({ message: 'Nie udało się dodać: ' + error.message, type: 'error' });
+      setToast({ message: 'Nie udało się zapisać: ' + error.message, type: 'error' });
     } else {
       setShowGiftModal(false);
       setNewGiftName('');
       setNewGiftDesc('');
       setNewGiftPrice('');
       setGiftVariants([{ label: '', url: '' }]);
-      setNewGiftIsSecret(false);
+      setEditingGift(null);
       if (isSurprise) {
         await fetchSurprises(activeOccasion.id);
       } else {
@@ -955,7 +980,12 @@ function App() {
       }
       await fetchAllGifts();
       await fetchAllSurprises();
-      setToast({ message: isSurprise ? 'Niespodzianka została dodana.' : 'Prezent został dodany do listy.', type: 'success' });
+      setToast({ 
+        message: editingGift 
+          ? (isSurprise ? 'Niespodzianka została zaktualizowana.' : 'Prezent został zaktualizowany.') 
+          : (isSurprise ? 'Niespodzianka została dodana.' : 'Prezent został dodany do listy.'), 
+        type: 'success' 
+      });
     }
     setLoading(false);
   };
@@ -1128,6 +1158,9 @@ function App() {
       });
       if (activeGiftDetails && activeGiftDetails.id === surpriseId) {
         setActiveGiftDetails((prev: any) => prev ? { ...prev, is_approved: approve } : null);
+      }
+      if (activeSurpriseDetails && activeSurpriseDetails.id === surpriseId) {
+        setActiveSurpriseDetails((prev: any) => prev ? { ...prev, is_approved: approve } : null);
       }
     }
     setLoading(false);
@@ -1431,6 +1464,7 @@ function App() {
               <th>{isSurprise ? 'Niespodzianka' : 'Prezent'}</th>
               {isSurprise && <th>Zaproponował</th>}
               {!isSurprise && <th>Cena</th>}
+              {!isSurprise && <th>Rezerwujący</th>}
               {isSurprise && <th>Głosowanie</th>}
               <th style={{ textAlign: 'right' }}>
                 <span className="hide-mobile">Szczegóły</span>
@@ -1448,12 +1482,21 @@ function App() {
                 : 'Ktoś inny';
 
               const suggestedByName = profiles[gift.suggested_by || '']?.display_name || 'Solenizant';
+              
+              const isApprovedByMe = !isSurprise && approvedBooking && approvedBooking.user_id === user?.id;
+
+              const bookersCount = giftBookings.length;
+              const bookersList = giftBookings
+                .map(b => profiles[b.user_id]?.display_name || 'Znajomy')
+                .join(', ');
+              const bookersText = bookersCount > 0 ? `${bookersCount} (${bookersList})` : '—';
 
               return (
                 <tr 
                   key={gift.id} 
                   style={{
                     cursor: 'pointer',
+                    ...(isApprovedByMe ? { color: '#fbbf24' } : {}),
                     ...(isBoughtBySomeoneElse ? { 
                       opacity: 0.55, 
                       filter: 'grayscale(100%)', 
@@ -1462,11 +1505,14 @@ function App() {
                     } : {})
                   }}
                   onClick={() => {
-                    setActiveGiftDetails(gift);
-                    setActiveGiftIsSurprise(isSurprise);
+                    if (isSurprise) {
+                      setActiveSurpriseDetails(gift);
+                    } else {
+                      setActiveGiftDetails(gift);
+                    }
                   }}
                 >
-                  <td data-label={isSurprise ? 'Niespodzianka' : 'Prezent'} style={{ fontWeight: 500 }}>
+                  <td data-label={isSurprise ? 'Niespodzianka' : 'Prezent'} style={{ fontWeight: 500, color: isApprovedByMe ? '#fbbf24' : 'inherit' }}>
                     {gift.name} {isBoughtBySomeoneElse && <span style={{ fontSize: '0.75rem', fontWeight: 'normal', fontStyle: 'italic', marginLeft: '0.4rem', color: 'var(--text-secondary)' }}>(Kupuje: {approvedBuyerName})</span>}
                   </td>
                   {isSurprise && (
@@ -1475,8 +1521,13 @@ function App() {
                     </td>
                   )}
                   {!isSurprise && (
-                    <td data-label="Cena" style={{ whiteSpace: 'nowrap' }}>
-                      {gift.price ? <strong style={{ color: isBoughtBySomeoneElse ? 'var(--text-secondary)' : 'var(--text-primary)' }}>{gift.price} zł</strong> : <span style={{ color: 'var(--text-secondary)' }}>—</span>}
+                    <td data-label="Cena" style={{ whiteSpace: 'nowrap', color: isApprovedByMe ? '#fbbf24' : 'inherit' }}>
+                      {gift.price ? <strong style={{ color: isApprovedByMe ? '#fbbf24' : (isBoughtBySomeoneElse ? 'var(--text-secondary)' : 'var(--text-primary)') }}>{gift.price} zł</strong> : <span style={{ color: 'var(--text-secondary)' }}>—</span>}
+                    </td>
+                  )}
+                  {!isSurprise && (
+                    <td data-label="Rezerwujący" style={{ color: isApprovedByMe ? '#fbbf24' : 'inherit' }}>
+                      {bookersText}
                     </td>
                   )}
                   {isSurprise && (
@@ -1503,8 +1554,11 @@ function App() {
                       className="btn btn-secondary" 
                       style={{ padding: '0.3rem 0.6rem', fontSize: '0.85rem', fontWeight: 'bold' }} 
                       onClick={() => {
-                        setActiveGiftDetails(gift);
-                        setActiveGiftIsSurprise(isSurprise);
+                        if (isSurprise) {
+                          setActiveSurpriseDetails(gift);
+                        } else {
+                          setActiveGiftDetails(gift);
+                        }
                       }}
                     >
                       ...
@@ -2491,7 +2545,7 @@ function App() {
                     </button>
                   </div>
                 )}
-                <button className="btn btn-primary" onClick={openGiftModal}>
+                <button className="btn btn-primary" onClick={() => openGiftModal(activeTab === 'goscie')}>
                   {activeTab === 'goscie' ? '🎉 Zaproponuj Niespodziankę' : '🎁 Dodaj Prezent'}
                 </button>
               </div>
@@ -2540,7 +2594,7 @@ function App() {
                       <div className="empty-state-icon">🎁</div>
                       <h4>Brak prezentów na liście</h4>
                       <p style={{ marginBottom: '1.5rem' }}>Dodaj prezenty, które chcesz podarować lub otrzymać!</p>
-                      <button className="btn btn-primary" onClick={openGiftModal}>
+                      <button className="btn btn-primary" onClick={() => openGiftModal(false)}>
                         Dodaj prezent
                       </button>
                     </div>
@@ -2562,7 +2616,7 @@ function App() {
                       <div className="empty-state-icon">🤫</div>
                       <h4>Brak pomysłów gości</h4>
                       <p style={{ marginBottom: '1.5rem' }}>Zaproponuj coś fajnego, o czym solenizant nie wie!</p>
-                      <button className="btn btn-primary" onClick={openGiftModal}>
+                      <button className="btn btn-primary" onClick={() => openGiftModal(true)}>
                         Zaproponuj niespodziankę
                       </button>
                     </div>
@@ -2806,8 +2860,11 @@ function App() {
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem' }}>
                                       <div 
                                         onClick={() => {
-                                          setActiveGiftDetails(refItem);
-                                          setActiveGiftIsSurprise(isSurpriseMsg);
+                                          if (isSurpriseMsg) {
+                                            setActiveSurpriseDetails(refItem);
+                                          } else {
+                                            setActiveGiftDetails(refItem);
+                                          }
                                         }}
                                         style={{ 
                                           padding: '0.3rem 0.5rem', 
@@ -3108,29 +3165,29 @@ function App() {
         </div>
       )}
 
-      {/* ----------------- ADD GIFT MODAL ----------------- */}
+      {/* ----------------- ADD/EDIT GIFT MODAL ----------------- */}
       {showGiftModal && activeOccasion && (
         <div className="modal-overlay">
           <div className="glass-panel modal-content">
             <div className="modal-header">
-              <h2>Dodaj propozycję prezentu</h2>
+              <h2>{editingGift ? (giftModalIsSurprise ? 'Edytuj niespodziankę' : 'Edytuj prezent') : (giftModalIsSurprise ? 'Zaproponuj niespodziankę' : 'Dodaj propozycję prezentu')}</h2>
               <button className="close-btn" onClick={() => setShowGiftModal(false)}>×</button>
             </div>
 
-            <form onSubmit={handleCreateGift}>
+            <form onSubmit={handleSaveGift}>
               <div className="form-group">
-                <label>Nazwa Prezentu *</label>
+                <label>{giftModalIsSurprise ? 'Nazwa niespodzianki *' : 'Nazwa prezentu *'}</label>
                 <input 
                   type="text" 
                   className="form-control" 
                   value={newGiftName} 
                   onChange={e => setNewGiftName(e.target.value)} 
-                  placeholder="np. Klocki LEGO Technic 42115" 
+                  placeholder={giftModalIsSurprise ? "np. Wspólny lot balonem" : "np. Klocki LEGO Technic 42115"} 
                   required 
                 />
               </div>
 
-              {!newGiftIsSecret && (
+              {!giftModalIsSurprise && (
                 <div className="form-group">
                   <label>Szacowana cena (zł)</label>
                   <input 
@@ -3202,32 +3259,16 @@ function App() {
                   rows={2}
                   value={newGiftDesc} 
                   onChange={e => setNewGiftDesc(e.target.value)} 
-                  placeholder="Dodatkowe informacje dla kupujących..." 
+                  placeholder={giftModalIsSurprise ? "Dodatkowe informacje o niespodziance..." : "Dodatkowe informacje dla kupujących..."} 
                 />
               </div>
-
-              {/* Surprise option: hide from solenizant if logged in user is not the solenizant */}
-              {!isOwnerActiveOccasion && (
-                <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '1.5rem 0' }}>
-                  <input 
-                    type="checkbox" 
-                    id="is_secret" 
-                    checked={newGiftIsSecret} 
-                    onChange={e => setNewGiftIsSecret(e.target.checked)} 
-                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                  />
-                  <label htmlFor="is_secret" style={{ margin: 0, textTransform: 'none', fontSize: '0.95rem', cursor: 'pointer', color: 'white' }}>
-                    🤫 Ukryj przed solenizantem (Niespodzianka)
-                  </label>
-                </div>
-              )}
 
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowGiftModal(false)}>
                   Anuluj
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={loading}>
-                  Dodaj
+                  {editingGift ? 'Zapisz' : 'Dodaj'}
                 </button>
               </div>
             </form>
@@ -3528,6 +3569,7 @@ function App() {
       )}
 
       {/* ----------------- GIFT DETAILS MODAL ----------------- */}
+      {/* ----------------- GIFT DETAILS MODAL ----------------- */}
       {activeGiftDetails && (
         <div className="modal-overlay" style={{ zIndex: 1900 }}>
           <div className="glass-panel modal-content" style={{ maxWidth: '500px', maxHeight: '90vh', overflowY: 'auto' }}>
@@ -3585,22 +3627,7 @@ function App() {
                 <div>
                   <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Status / Zakup:</strong>
                   <div style={{ marginTop: '0.35rem' }}>
-                    {renderGiftBookingsCell(activeGiftDetails, activeGiftIsSurprise)}
-                  </div>
-                </div>
-              )}
-
-              {(!isOwnerActiveOccasion && activeGiftIsSurprise) && (
-                <div>
-                  <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Głosowanie:</strong>
-                  <div style={{ marginTop: '0.35rem' }}>
-                    <button 
-                      className={`btn ${hasUserVoted(activeGiftDetails.id, activeGiftIsSurprise) ? 'btn-primary' : 'btn-secondary'}`} 
-                      style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
-                      onClick={() => hasUserVoted(activeGiftDetails.id, activeGiftIsSurprise) ? handleUnvote(activeGiftDetails.id, activeGiftIsSurprise) : handleVote(activeGiftDetails.id, activeGiftIsSurprise)}
-                    >
-                      👍 {getVoteCount(activeGiftDetails.id, activeGiftIsSurprise)} Głosów
-                    </button>
+                    {renderGiftBookingsCell(activeGiftDetails, false)}
                   </div>
                 </div>
               )}
@@ -3611,7 +3638,7 @@ function App() {
                     💬 Czat / komentarze do prezentu:
                   </strong>
                   
-                  {/* Messages list for this gift/surprise */}
+                  {/* Messages list for this gift */}
                   <div 
                     style={{ 
                       maxHeight: '180px', 
@@ -3627,11 +3654,7 @@ function App() {
                     }}
                   >
                     {(() => {
-                      const itemMessages = messages.filter(m => 
-                        activeGiftIsSurprise 
-                          ? m.surprise_id === activeGiftDetails.id 
-                          : m.gift_id === activeGiftDetails.id
-                      );
+                      const itemMessages = messages.filter(m => m.gift_id === activeGiftDetails.id);
 
                       if (itemMessages.length === 0) {
                         return (
@@ -3682,7 +3705,7 @@ function App() {
                   </div>
 
                   {/* Send comment form */}
-                  <form onSubmit={(e) => handleSendComment(e, activeGiftDetails.id, activeGiftIsSurprise)} style={{ display: 'flex', gap: '0.5rem' }}>
+                  <form onSubmit={(e) => handleSendComment(e, activeGiftDetails.id, false)} style={{ display: 'flex', gap: '0.5rem' }}>
                     <input 
                       type="text" 
                       className="form-control" 
@@ -3707,16 +3730,221 @@ function App() {
               >
                 Zamknij
               </button>
-              {(activeGiftDetails.suggested_by === user?.id || activeOccasion?.creator_id === user?.id) && (
+              {(activeGiftDetails.suggested_by === user?.id || profiles[user?.id]?.is_admin) && (
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  onClick={() => startEditGift(activeGiftDetails, false)}
+                >
+                  ✏️ Edytuj
+                </button>
+              )}
+              {(activeGiftDetails.suggested_by === user?.id || activeOccasion?.creator_id === user?.id || profiles[user?.id]?.is_admin) && (
                 <button 
                   type="button" 
                   className="btn btn-danger btn-secondary" 
                   onClick={() => {
-                    handleDeleteItem(activeGiftDetails.id, activeGiftIsSurprise);
+                    handleDeleteItem(activeGiftDetails.id, false);
                     setActiveGiftDetails(null);
                   }}
                 >
-                  {activeGiftIsSurprise ? 'Usuń niespodziankę' : 'Usuń prezent'}
+                  Usuń prezent
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------- SURPRISE DETAILS MODAL ----------------- */}
+      {activeSurpriseDetails && (
+        <div className="modal-overlay" style={{ zIndex: 1900 }}>
+          <div className="glass-panel modal-content" style={{ maxWidth: '500px', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div className="modal-header">
+              <h2>Szczegóły niespodzianki</h2>
+              <button className="close-btn" onClick={() => setActiveSurpriseDetails(null)}>×</button>
+            </div>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', textAlign: 'left' }}>
+              <div>
+                <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Nazwa niespodzianki:</strong>
+                <div style={{ fontSize: '1.15rem', fontWeight: 600, color: 'white', marginTop: '0.15rem' }}>{activeSurpriseDetails.name}</div>
+              </div>
+              {activeSurpriseDetails.description && (
+                <div>
+                  <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Opis:</strong>
+                  <div style={{ fontSize: '0.95rem', color: 'var(--text-secondary)', marginTop: '0.15rem', background: 'rgba(255,255,255,0.02)', padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                    {activeSurpriseDetails.description}
+                  </div>
+                </div>
+              )}
+              <div>
+                <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Zaproponował:</strong>
+                <div style={{ fontSize: '0.9rem', marginTop: '0.15rem' }}>
+                  {profiles[activeSurpriseDetails.suggested_by || '']?.display_name || 'Znajomy'}
+                </div>
+              </div>
+              <div>
+                <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Linki do sklepów:</strong>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.25rem' }}>
+                  {activeSurpriseDetails.urls && activeSurpriseDetails.urls.length > 0 ? (
+                    activeSurpriseDetails.urls.map((link: { label: string; url: string }, idx: number) => (
+                      <a key={idx} href={link.url} target="_blank" rel="noopener noreferrer" className="gift-link-tag">
+                        🔗 {link.label}
+                      </a>
+                    ))
+                  ) : (
+                    activeSurpriseDetails.url ? (
+                      <a href={activeSurpriseDetails.url} target="_blank" rel="noopener noreferrer" className="gift-link-tag">
+                        🔗 Sklep
+                      </a>
+                    ) : (
+                      <span style={{ color: 'var(--text-secondary)' }}>Brak linków</span>
+                    )
+                  )}
+                </div>
+              </div>
+
+              {!isOwnerActiveOccasion && (
+                <div>
+                  <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Status / Zatwierdzenie:</strong>
+                  <div style={{ marginTop: '0.35rem' }}>
+                    {renderGiftBookingsCell(activeSurpriseDetails, true)}
+                  </div>
+                </div>
+              )}
+
+              {!isOwnerActiveOccasion && (
+                <div>
+                  <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>Polubienia / Głosy:</strong>
+                  <div style={{ marginTop: '0.35rem' }}>
+                    <button 
+                      className={`btn ${hasUserVoted(activeSurpriseDetails.id, true) ? 'btn-primary' : 'btn-secondary'}`} 
+                      style={{ padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
+                      onClick={() => hasUserVoted(activeSurpriseDetails.id, true) ? handleUnvote(activeSurpriseDetails.id, true) : handleVote(activeSurpriseDetails.id, true)}
+                    >
+                      👍 {getVoteCount(activeSurpriseDetails.id, true)} Głosów
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!isOwnerActiveOccasion && (
+                <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)', paddingTop: '1rem', marginTop: '1rem' }}>
+                  <strong style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase', display: 'block', marginBottom: '0.5rem' }}>
+                    💬 Czat / komentarze do niespodzianki:
+                  </strong>
+                  
+                  {/* Messages list for this surprise */}
+                  <div 
+                    style={{ 
+                      maxHeight: '180px', 
+                      overflowY: 'auto', 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: '0.75rem',
+                      padding: '0.75rem',
+                      borderRadius: '8px',
+                      background: 'rgba(0, 0, 0, 0.25)',
+                      marginBottom: '0.75rem',
+                      border: '1px solid rgba(255, 255, 255, 0.05)'
+                    }}
+                  >
+                    {(() => {
+                      const itemMessages = messages.filter(m => m.surprise_id === activeSurpriseDetails.id);
+
+                      if (itemMessages.length === 0) {
+                        return (
+                          <div style={{ textAlign: 'center', fontSize: '0.85rem', color: 'var(--text-secondary)', padding: '1rem 0' }}>
+                            Brak komentarzy. Napisz coś!
+                          </div>
+                        );
+                      }
+
+                      return itemMessages.map(m => {
+                        const isMe = m.user_id === user?.id;
+                        const senderName = profiles[m.user_id]?.display_name || 'Znajomy';
+                        return (
+                          <div 
+                            key={m.id} 
+                            style={{ 
+                              display: 'flex', 
+                              flexDirection: 'column',
+                              alignSelf: isMe ? 'flex-end' : 'flex-start',
+                              maxWidth: '85%'
+                            }}
+                          >
+                            <div style={{ 
+                              fontSize: '0.7rem', 
+                              color: 'var(--text-secondary)', 
+                              marginBottom: '0.15rem',
+                              alignSelf: isMe ? 'flex-end' : 'flex-start'
+                            }}>
+                              <strong>{isMe ? 'Ty' : senderName}</strong> • {formatMessageTime(m.created_at)}
+                            </div>
+                            <div 
+                              style={{ 
+                                background: isMe ? 'linear-gradient(135deg, var(--primary), var(--secondary))' : 'rgba(255, 255, 255, 0.05)',
+                                color: 'white',
+                                padding: '0.5rem 0.75rem',
+                                borderRadius: isMe ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
+                                fontSize: '0.85rem',
+                                border: isMe ? 'none' : '1px solid rgba(255, 255, 255, 0.05)',
+                                wordBreak: 'break-word'
+                              }}
+                            >
+                              {m.message}
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+
+                  {/* Send comment form */}
+                  <form onSubmit={(e) => handleSendComment(e, activeSurpriseDetails.id, true)} style={{ display: 'flex', gap: '0.5rem' }}>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      placeholder="Dodaj komentarz..." 
+                      value={newComment} 
+                      onChange={e => setNewComment(e.target.value)} 
+                      style={{ padding: '0.5rem 0.75rem', borderRadius: '8px', fontSize: '0.85rem' }}
+                      required
+                    />
+                    <button type="submit" className="btn btn-primary" style={{ padding: '0 1rem', fontSize: '0.85rem' }}>
+                      Wyślij
+                    </button>
+                  </form>
+                </div>
+              )}
+            </div>
+            <div className="modal-actions">
+              <button 
+                type="button" 
+                className="btn btn-secondary" 
+                onClick={() => setActiveSurpriseDetails(null)}
+              >
+                Zamknij
+              </button>
+              {(activeSurpriseDetails.suggested_by === user?.id || profiles[user?.id]?.is_admin) && (
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  onClick={() => startEditGift(activeSurpriseDetails, true)}
+                >
+                  ✏️ Edytuj
+                </button>
+              )}
+              {(activeSurpriseDetails.suggested_by === user?.id || activeOccasion?.creator_id === user?.id || profiles[user?.id]?.is_admin) && (
+                <button 
+                  type="button" 
+                  className="btn btn-danger btn-secondary" 
+                  onClick={() => {
+                    handleDeleteItem(activeSurpriseDetails.id, true);
+                    setActiveSurpriseDetails(null);
+                  }}
+                >
+                  Usuń niespodziankę
                 </button>
               )}
             </div>
