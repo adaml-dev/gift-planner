@@ -1320,10 +1320,16 @@ function App() {
 
   const handleToggleApproveBooking = async (bookingId: string, approve: boolean) => {
     setLoading(true);
-    const { error } = await supabase
-      .from('gp_bookings')
-      .update({ is_approved: approve })
-      .eq('id', bookingId);
+    const booking = bookings.find(b => b.id === bookingId);
+    let queryBuilder = supabase.from('gp_bookings').update({ is_approved: approve });
+    
+    if (booking && booking.is_group && booking.group_id) {
+      queryBuilder = queryBuilder.eq('group_id', booking.group_id);
+    } else {
+      queryBuilder = queryBuilder.eq('id', bookingId);
+    }
+
+    const { error } = await queryBuilder;
 
     if (error) {
       setToast({ message: 'Nie udało się zmienić statusu zatwierdzenia: ' + error.message, type: 'error' });
