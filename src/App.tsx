@@ -130,6 +130,32 @@ function App() {
   const [activeSurpriseDetails, setActiveSurpriseDetails] = useState<any | null>(null);
   const [giftModalIsSurprise, setGiftModalIsSurprise] = useState(false);
   const [editingGift, setEditingGift] = useState<any | null>(null);
+  const [isSelectingSkladkaUsers, setIsSelectingSkladkaUsers] = useState(false);
+  const [skladkaSelectedUsers, setSkladkaSelectedUsers] = useState<string[]>([]);
+  const [lastReadMap, setLastReadMap] = useState<Record<string, string>>({});
+
+  const updateLastRead = (threadId: string) => {
+    if (!user) return;
+    const nowStr = new Date().toISOString();
+    setLastReadMap(prev => {
+      const newMap = { ...prev, [threadId]: nowStr };
+      try {
+        localStorage.setItem(`gp_last_read_${user.id}`, JSON.stringify(newMap));
+      } catch (e) {
+        console.error(e);
+      }
+      return newMap;
+    });
+  };
+
+  const getGiftChatStats = (giftId: string, isSurprise: boolean) => {
+    const itemMessages = messages.filter(m => isSurprise ? m.surprise_id === giftId : m.gift_id === giftId);
+    const totalCount = itemMessages.length;
+    const threadId = isSurprise ? `surprise:${giftId}` : `gift:${giftId}`;
+    const lastRead = lastReadMap[threadId] || '';
+    const unreadCount = itemMessages.filter(m => m.user_id !== user?.id && (!lastRead || m.created_at > lastRead)).length;
+    return { totalCount, unreadCount };
+  };
 
   // Chat states
   const [messages, setMessages] = useState<any[]>([]);
@@ -221,6 +247,39 @@ function App() {
       fetchAllSurprises();
     }
   }, [user]);
+
+  // Load lastReadMap on login
+  useEffect(() => {
+    if (user) {
+      try {
+        const data = localStorage.getItem(`gp_last_read_${user.id}`);
+        setLastReadMap(data ? JSON.parse(data) : {});
+      } catch {
+        setLastReadMap({});
+      }
+    } else {
+      setLastReadMap({});
+    }
+  }, [user]);
+
+  // Mark chat threads read automatically
+  useEffect(() => {
+    if (activeTab === 'chat' && activeOccasion && chatFilter !== 'all') {
+      updateLastRead(chatFilter);
+    }
+  }, [activeTab, chatFilter, activeOccasion]);
+
+  useEffect(() => {
+    if (activeGiftDetails) {
+      updateLastRead(`gift:${activeGiftDetails.id}`);
+    }
+  }, [activeGiftDetails]);
+
+  useEffect(() => {
+    if (activeSurpriseDetails) {
+      updateLastRead(`surprise:${activeSurpriseDetails.id}`);
+    }
+  }, [activeSurpriseDetails]);
 
   // 1.5. Event chat messages realtime subscription & handlers
   useEffect(() => {
@@ -1020,27 +1079,55 @@ function App() {
   };
 
   // Booking logic
-  const handleBook = async (itemId: string, isGroup: boolean = false, groupId: string | null = null, isSurprise: boolean = false) => {
-    const insertData: any = { 
-      user_id: user.id, 
-      is_group: isGroup,
-      group_id: groupId 
-    };
-    if (isSurprise) {
-      insertData.surprise_id = itemId;
+  const handleBook = async (itemId: string, isGroup: boolean = false, groupId: string | null = null, isSurprise: boolean = false, additionalUserIds: string[] = []) => {
+    if (isGroup && groupId) {
+      const rows = [
+        {
+          user_id: user.id,
+          is_group: true,
+          group_id: groupId,
+          [isSurprise ? 'surprise_id' : 'gift_id']: itemId
+        },
+        ...additionalUserIds.map(uid => ({
+          user_id: uid,
+          is_group: true,
+          group_id: groupId,
+          [isSurprise ? 'surprise_id' : 'gift_id']: itemId
+        }))
+      ];
+
+      const { error } = await supabase
+        .from('gp_bookings')
+        .insert(rows);
+
+      if (error) {
+        setToast({ message: 'Błąd rezerwacji grupowej: ' + error.message, type: 'error' });
+      } else if (activeOccasion) {
+        fetchBookings(activeOccasion.id);
+        setToast({ message: additionalUserIds.length > 0 ? 'Utworzono składkę grupową ze wskazanymi uczestnikami!' : 'Dołączono do składki grupowej!', type: 'success' });
+      }
     } else {
-      insertData.gift_id = itemId;
-    }
+      const insertData: any = { 
+        user_id: user.id, 
+        is_group: isGroup,
+        group_id: groupId 
+      };
+      if (isSurprise) {
+        insertData.surprise_id = itemId;
+      } else {
+        insertData.gift_id = itemId;
+      }
 
-    const { error } = await supabase
-      .from('gp_bookings')
-      .insert(insertData);
+      const { error } = await supabase
+        .from('gp_bookings')
+        .insert(insertData);
 
-    if (error) {
-      setToast({ message: 'Błąd rezerwacji: ' + error.message, type: 'error' });
-    } else if (activeOccasion) {
-      fetchBookings(activeOccasion.id);
-      setToast({ message: isGroup ? 'Dołączono do składki grupowej!' : 'Zarezerwowano prezent!', type: 'success' });
+      if (error) {
+        setToast({ message: 'Błąd rezerwacji: ' + error.message, type: 'error' });
+      } else if (activeOccasion) {
+        fetchBookings(activeOccasion.id);
+        setToast({ message: 'Zarezerwowano prezent!', type: 'success' });
+      }
     }
   };
 
@@ -1366,12 +1453,12 @@ function App() {
                   </div>
                   
                   <div style={{ color: 'white', fontWeight: 500 }}>
-                    Kupujący: <strong style={{ color: 'var(--text-primary)' }}>{isMyBooking ? 'Ty' : displayName}</strong>
+                    Rezerwujący: <strong style={{ color: 'var(--text-primary)' }}>{isMyBooking ? 'Ty' : displayName}</strong>
                   </div>
 
                   {!b.is_approved && hasApproved && (
                     <div style={{ fontSize: '0.75rem', color: 'var(--accent-red, #fca5a5)', fontStyle: 'italic' }}>
-                      Organizator zatwierdził zakup przez: {approvedBooking ? (profiles[approvedBooking.user_id]?.display_name || 'innego uczestnika') : 'innego uczestnika'}
+                      Organizator zatwierdził rezerwację przez: {approvedBooking ? (profiles[approvedBooking.user_id]?.display_name || 'innego uczestnika') : 'innego uczestnika'}
                     </div>
                   )}
 
@@ -1394,7 +1481,7 @@ function App() {
                               style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', background: '#10b981', borderColor: '#10b981' }} 
                               onClick={() => handleToggleApproveBooking(b.id, true)}
                             >
-                              ✅ Zatwierdź zakup
+                              ✅ Zatwierdź rezerwację
                             </button>
                           )
                         )}
@@ -1407,7 +1494,17 @@ function App() {
                         style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }} 
                         onClick={() => handleUnbook(item.id, isSurprise)}
                       >
-                        {b.is_approved ? 'Anuluj zakup' : (b.is_group ? 'Opuść składkę' : 'Anuluj rezerwację')}
+                        {b.is_approved ? 'Anuluj rezerwację' : (b.is_group ? 'Opuść składkę' : 'Anuluj rezerwację')}
+                      </button>
+                    )}
+
+                    {b.is_group && !hasApproved && !hasMyBooking && (
+                      <button 
+                        className="btn btn-primary" 
+                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', background: 'var(--primary)', borderColor: 'var(--primary)' }} 
+                        onClick={() => handleBook(item.id, true, b.group_id, isSurprise)}
+                      >
+                        👥 Dołącz do składki
                       </button>
                     )}
                   </div>
@@ -1438,7 +1535,11 @@ function App() {
               <button 
                 className="btn btn-primary" 
                 style={{ padding: '0.5rem 1rem', fontSize: '0.85rem', width: '100%' }} 
-                onClick={() => setBookingModal({ show: true, giftId: item.id, giftName: item.name, isSurprise })}
+                onClick={() => {
+                  setIsSelectingSkladkaUsers(false);
+                  setSkladkaSelectedUsers([]);
+                  setBookingModal({ show: true, giftId: item.id, giftName: item.name, isSurprise });
+                }}
               >
                 Rezerwacja
               </button>
@@ -1466,6 +1567,7 @@ function App() {
               {!isSurprise && <th>Cena</th>}
               {!isSurprise && <th>Rezerwujący</th>}
               {isSurprise && <th>Głosowanie</th>}
+              <th>Czat</th>
               <th style={{ textAlign: 'right' }}>
                 <span className="hide-mobile">Szczegóły</span>
                 <span className="show-mobile-inline">...</span>
@@ -1490,6 +1592,8 @@ function App() {
                 .map(b => profiles[b.user_id]?.display_name || 'Znajomy')
                 .join(', ');
               const bookersText = bookersCount > 0 ? `${bookersCount} (${bookersList})` : '—';
+              
+              const chatStats = getGiftChatStats(gift.id, isSurprise);
 
               return (
                 <tr 
@@ -1513,7 +1617,7 @@ function App() {
                   }}
                 >
                   <td data-label={isSurprise ? 'Niespodzianka' : 'Prezent'} style={{ fontWeight: 500, color: isApprovedByMe ? '#fbbf24' : 'inherit' }}>
-                    {gift.name} {isBoughtBySomeoneElse && <span style={{ fontSize: '0.75rem', fontWeight: 'normal', fontStyle: 'italic', marginLeft: '0.4rem', color: 'var(--text-secondary)' }}>(Kupuje: {approvedBuyerName})</span>}
+                    {gift.name} {isBoughtBySomeoneElse && <span style={{ fontSize: '0.75rem', fontWeight: 'normal', fontStyle: 'italic', marginLeft: '0.4rem', color: 'var(--text-secondary)' }}>(Rezerwuje: {approvedBuyerName})</span>}
                   </td>
                   {isSurprise && (
                     <td data-label="Zaproponował" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
@@ -1549,6 +1653,14 @@ function App() {
                       </button>
                     </td>
                   )}
+                  <td data-label="Czat" onClick={(e) => {
+                    e.stopPropagation();
+                    setChatFilter(isSurprise ? `surprise:${gift.id}` : `gift:${gift.id}`);
+                    setActiveTab('chat');
+                    updateLastRead(isSurprise ? `surprise:${gift.id}` : `gift:${gift.id}`);
+                  }} style={{ color: isApprovedByMe ? '#fbbf24' : 'inherit', whiteSpace: 'nowrap' }}>
+                    💬 {chatStats.totalCount} {chatStats.unreadCount > 0 ? <span style={{ color: '#f87171', fontWeight: 'bold' }}>({chatStats.unreadCount})</span> : ''}
+                  </td>
                   <td data-label="Szczegóły" style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                     <button 
                       className="btn btn-secondary" 
@@ -2196,7 +2308,7 @@ function App() {
                             <th>Prezent</th>
                             <th>Wydarzenie</th>
                             <th>Status</th>
-                            <th>Kupujący</th>
+                            <th>Rezerwujący</th>
                             <th style={{ textAlign: 'right' }}>Akcje</th>
                           </tr>
                         </thead>
@@ -2240,8 +2352,8 @@ function App() {
                                     ❌ Odrzucona
                                   </span>
                                 </td>
-                                <td data-label="Kupujący" style={{ fontStyle: 'italic', color: 'var(--text-secondary)' }}>
-                                  Kupuje: {approvedBuyerName}
+                                <td data-label="Rezerwujący" style={{ fontStyle: 'italic', color: 'var(--text-secondary)' }}>
+                                  Rezerwuje: {approvedBuyerName}
                                 </td>
                                 <td data-label="Akcje" style={{ textAlign: 'right' }}>
                                   <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end' }}>
@@ -3259,7 +3371,7 @@ function App() {
                   rows={2}
                   value={newGiftDesc} 
                   onChange={e => setNewGiftDesc(e.target.value)} 
-                  placeholder={giftModalIsSurprise ? "Dodatkowe informacje o niespodziance..." : "Dodatkowe informacje dla kupujących..."} 
+                  placeholder={giftModalIsSurprise ? "Dodatkowe informacje o niespodziance..." : "Dodatkowe informacje dla rezerwujących..."} 
                 />
               </div>
 
@@ -3959,43 +4071,117 @@ function App() {
             <div className="modal-header" style={{ justifyContent: 'center', marginBottom: '1rem' }}>
               <h2 style={{ margin: 0 }}>🎁 Rezerwacja prezentu</h2>
             </div>
-            <div className="modal-body" style={{ marginBottom: '1.5rem', fontSize: '0.95rem', lineHeight: '1.5' }}>
-              Chcesz zarezerwować prezent <strong>{bookingModal.giftName}</strong>.
-              <br />
-              Wybierz, czy kupujesz go samodzielnie, czy chcesz zorganizować składkę:
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <button 
-                className="btn btn-primary" 
-                onClick={async () => {
-                  const gId = bookingModal.giftId;
-                  const isS = !!bookingModal.isSurprise;
-                  setBookingModal(null);
-                  await handleBook(gId, false, null, isS);
-                }}
-              >
-                👤 Rezerwuję sam (kupuję samodzielnie)
-              </button>
-              <button 
-                className="btn btn-secondary" 
-                style={{ border: '1px solid var(--primary)' }}
-                onClick={async () => {
-                  const gId = bookingModal.giftId;
-                  const isS = !!bookingModal.isSurprise;
-                  setBookingModal(null);
-                  await handleBook(gId, true, generateUUID(), isS);
-                }}
-              >
-                👥 Składka (organizuję składkę grupową)
-              </button>
-              <button 
-                className="btn btn-secondary" 
-                style={{ marginTop: '0.5rem' }}
-                onClick={() => setBookingModal(null)}
-              >
-                Anuluj
-              </button>
-            </div>
+            {!isSelectingSkladkaUsers ? (
+              <>
+                <div className="modal-body" style={{ marginBottom: '1.5rem', fontSize: '0.95rem', lineHeight: '1.5' }}>
+                  Chcesz zarezerwować prezent <strong>{bookingModal.giftName}</strong>.
+                  <br />
+                  Wybierz, czy rezerwujesz go samodzielnie, czy chcesz zorganizować składkę:
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <button 
+                    className="btn btn-primary" 
+                    onClick={async () => {
+                      const gId = bookingModal.giftId;
+                      const isS = !!bookingModal.isSurprise;
+                      setBookingModal(null);
+                      await handleBook(gId, false, null, isS);
+                    }}
+                  >
+                    👤 Rezerwuję sam
+                  </button>
+                  <button 
+                    className="btn btn-secondary" 
+                    style={{ border: '1px solid var(--primary)' }}
+                    onClick={() => {
+                      setIsSelectingSkladkaUsers(true);
+                      setSkladkaSelectedUsers([]);
+                    }}
+                  >
+                    👥 Składka (organizuję składkę grupową)
+                  </button>
+                  <button 
+                    className="btn btn-secondary" 
+                    style={{ marginTop: '0.5rem' }}
+                    onClick={() => setBookingModal(null)}
+                  >
+                    Anuluj
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="modal-body" style={{ marginBottom: '1rem', fontSize: '0.95rem', lineHeight: '1.5' }}>
+                  Wybierz innych uczestników składki na <strong>{bookingModal.giftName}</strong>:
+                </div>
+                {(() => {
+                  const solenizantId = activeOccasion?.owner_id;
+                  const selectableUserIds = (activeOccasion?.invited_user_ids && activeOccasion.invited_user_ids.length > 0)
+                    ? activeOccasion.invited_user_ids.filter(id => id !== user?.id && id !== solenizantId)
+                    : Object.keys(profiles).filter(id => id !== user?.id && id !== solenizantId);
+
+                  return (
+                    <div style={{ maxHeight: '200px', overflowY: 'auto', textAlign: 'left', margin: '1rem 0', padding: '0.5rem', background: 'rgba(0,0,0,0.25)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                      {selectableUserIds.length === 0 ? (
+                        <div style={{ padding: '1rem', color: 'var(--text-secondary)', textAlign: 'center', fontSize: '0.9rem' }}>
+                          Brak innych zaproszonych uczestników do wyboru.
+                        </div>
+                      ) : (
+                        selectableUserIds.map(uid => {
+                          const p = profiles[uid];
+                          if (!p) return null;
+                          const isChecked = skladkaSelectedUsers.includes(uid);
+                          return (
+                            <label key={uid} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.5rem', cursor: 'pointer', color: 'white', textTransform: 'none', margin: 0, fontSize: '0.925rem' }}>
+                              <input 
+                                type="checkbox" 
+                                checked={isChecked}
+                                onChange={() => {
+                                  if (isChecked) {
+                                    setSkladkaSelectedUsers(skladkaSelectedUsers.filter(id => id !== uid));
+                                  } else {
+                                    setSkladkaSelectedUsers([...skladkaSelectedUsers, uid]);
+                                  }
+                                }}
+                                style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                              />
+                              <span>{p.display_name}</span>
+                            </label>
+                          );
+                        })
+                      )}
+                    </div>
+                  );
+                })()}
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+                  <button 
+                    className="btn btn-secondary" 
+                    style={{ flex: 1 }}
+                    onClick={() => {
+                      setIsSelectingSkladkaUsers(false);
+                      setSkladkaSelectedUsers([]);
+                    }}
+                  >
+                    Wstecz
+                  </button>
+                  <button 
+                    className="btn btn-primary" 
+                    style={{ flex: 1 }}
+                    onClick={async () => {
+                      const gId = bookingModal.giftId;
+                      const isS = !!bookingModal.isSurprise;
+                      const users = skladkaSelectedUsers;
+                      setBookingModal(null);
+                      setIsSelectingSkladkaUsers(false);
+                      setSkladkaSelectedUsers([]);
+                      await handleBook(gId, true, generateUUID(), isS, users);
+                    }}
+                  >
+                    Stwórz składkę
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
