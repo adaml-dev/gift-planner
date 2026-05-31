@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { supabase, authAdminClient } from './supabase';
-import giftBanner from './assets/gift_banner.png';
 import versionInfo from './version.json';
 
 const generateUUID = () => {
@@ -102,6 +101,7 @@ function App() {
   }
   const [loginLogs, setLoginLogs] = useState<LoginLog[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [selectedLogUserFilter, setSelectedLogUserFilter] = useState<string>('all');
   
   // Tab control in Occasion view
   const [activeTab, setActiveTab] = useState<'solenizant' | 'goscie' | 'chat'>('solenizant');
@@ -1856,8 +1856,11 @@ function App() {
       <div className="auth-container">
         <div className="glass-panel auth-card">
           <div className="auth-header">
-            <img src={giftBanner} alt="Gift Planner Logo" width="300" height="200" style={{ objectFit: 'cover' }} />
+            <span style={{ fontSize: '3rem', display: 'block', marginBottom: '0.5rem' }}>🎁</span>
             <h1>Gift Planner</h1>
+            <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', margin: '0.5rem 0 1rem 0', fontStyle: 'italic', maxWidth: '400px', marginLeft: 'auto', marginRight: 'auto', lineHeight: '1.4' }}>
+              Rodzinny planer prezentów i niespodzianek – planuj okazje, rezerwuj podarunki, organizuj wspólne składki i rozmawiaj na czacie bez wiedzy solenizanta!
+            </p>
             <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0.5rem 0', opacity: 0.7 }}>
               v{versionInfo.version} ({versionInfo.date})
             </p>
@@ -1899,8 +1902,11 @@ function App() {
       <div className="auth-container">
         <div className="glass-panel auth-card" style={{ maxWidth: selectedProfile ? '500px' : '650px', transition: 'max-width 0.3s ease' }}>
           <div className="auth-header">
-            <img src={giftBanner} alt="Gift Planner Logo" width="300" height="200" style={{ objectFit: 'cover' }} />
+            <span style={{ fontSize: '3rem', display: 'block', marginBottom: '0.5rem' }}>🎁</span>
             <h1>Gift Planner</h1>
+            <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', margin: '0.5rem 0 1rem 0', fontStyle: 'italic', maxWidth: '400px', marginLeft: 'auto', marginRight: 'auto', lineHeight: '1.4' }}>
+              Rodzinny planer prezentów i niespodzianek – planuj okazje, rezerwuj podarunki, organizuj wspólne składki i rozmawiaj na czacie bez wiedzy solenizanta!
+            </p>
             <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0.5rem 0', opacity: 0.7 }}>
               v{versionInfo.version} ({versionInfo.date})
             </p>
@@ -2146,7 +2152,7 @@ function App() {
       {/* ----------------- LOGIN LOGS VIEW (ADMIN ONLY) ----------------- */}
       {view === 'login-logs' && (
         <main className="container">
-          <div className="dashboard-header" style={{ marginBottom: '1.5rem' }}>
+          <div className="dashboard-header" style={{ marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
             <div>
               <button 
                 className="back-link" 
@@ -2160,14 +2166,31 @@ function App() {
                 Historia logowań i wylogowań członków rodziny.
               </p>
             </div>
-            <button 
-              className="btn btn-secondary" 
-              onClick={fetchLoginLogs}
-              disabled={loadingLogs}
-              style={{ padding: '0.6rem 1.2rem', fontSize: '0.9rem' }}
-            >
-              🔄 Odśwież logi
-            </button>
+            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <label htmlFor="log_user_filter" style={{ margin: 0, textTransform: 'none', color: 'var(--text-secondary)', fontSize: '0.9rem', whiteSpace: 'nowrap' }}>Użytkownik:</label>
+                <select 
+                  id="log_user_filter"
+                  className="form-control" 
+                  value={selectedLogUserFilter} 
+                  onChange={(e) => setSelectedLogUserFilter(e.target.value)}
+                  style={{ padding: '0.4rem 0.8rem', fontSize: '0.9rem', width: 'auto', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', color: 'white', minWidth: '150px' }}
+                >
+                  <option value="all">Wszyscy</option>
+                  {Object.values(profiles).map(p => (
+                    <option key={p.id} value={p.id}>{p.display_name}</option>
+                  ))}
+                </select>
+              </div>
+              <button 
+                className="btn btn-secondary" 
+                onClick={fetchLoginLogs}
+                disabled={loadingLogs}
+                style={{ padding: '0.6rem 1.2rem', fontSize: '0.9rem' }}
+              >
+                🔄 Odśwież logi
+              </button>
+            </div>
           </div>
 
           <div className="glass-panel" style={{ padding: '1.5rem', overflowX: 'auto' }}>
@@ -2190,64 +2213,80 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {loginLogs.map(log => {
-                    const profile = profiles[log.user_id];
-                    const loginDate = new Date(log.login_at);
-                    const logoutDate = log.logout_at ? new Date(log.logout_at) : null;
+                  {(() => {
+                    const filteredLogs = selectedLogUserFilter === 'all' 
+                      ? loginLogs 
+                      : loginLogs.filter(log => log.user_id === selectedLogUserFilter);
                     
-                    let durationText = 'Aktywna sesja';
-                    if (logoutDate) {
-                      const diffMs = logoutDate.getTime() - loginDate.getTime();
-                      const diffMins = Math.floor(diffMs / 60000);
-                      const diffHours = Math.floor(diffMins / 60);
-                      const remainingMins = diffMins % 60;
-                      
-                      if (diffHours > 0) {
-                        durationText = `${diffHours} godz. ${remainingMins} min.`;
-                      } else if (diffMins > 0) {
-                        durationText = `${diffMins} min.`;
-                      } else {
-                        durationText = 'Krótka sesja (< 1 min)';
-                      }
+                    if (filteredLogs.length === 0) {
+                      return (
+                        <tr>
+                          <td colSpan={4} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
+                            Brak wpisów logowań dla wybranego filtru.
+                          </td>
+                        </tr>
+                      );
                     }
+                    
+                    return filteredLogs.map(log => {
+                      const profile = profiles[log.user_id];
+                      const loginDate = new Date(log.login_at);
+                      const logoutDate = log.logout_at ? new Date(log.logout_at) : null;
+                      
+                      let durationText = 'Aktywna sesja';
+                      if (logoutDate) {
+                        const diffMs = logoutDate.getTime() - loginDate.getTime();
+                        const diffMins = Math.floor(diffMs / 60000);
+                        const diffHours = Math.floor(diffMins / 60);
+                        const remainingMins = diffMins % 60;
+                        
+                        if (diffHours > 0) {
+                          durationText = `${diffHours} godz. ${remainingMins} min.`;
+                        } else if (diffMins > 0) {
+                          durationText = `${diffMins} min.`;
+                        } else {
+                          durationText = 'Krótka sesja (< 1 min)';
+                        }
+                      }
 
-                    const formatDateTime = (date: Date) => {
-                      return date.toLocaleString('pl-PL', {
-                        year: 'numeric',
-                        month: '2-digit',
-                        day: '2-digit',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit'
-                      });
-                    };
+                      const formatDateTime = (date: Date) => {
+                        return date.toLocaleString('pl-PL', {
+                          year: 'numeric',
+                          month: '2-digit',
+                          day: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit'
+                        });
+                      };
 
-                    return (
-                      <tr 
-                        key={log.id} 
-                        style={{ 
-                          borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
-                          transition: 'background 0.2s'
-                        }}
-                        className="table-row-hover"
-                      >
-                        <td style={{ padding: '1rem', fontWeight: '500' }}>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            👤 {profile?.display_name || 'Nieznany użytkownik'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '1rem', color: 'var(--text-primary)' }}>
-                          📅 {formatDateTime(loginDate)}
-                        </td>
-                        <td style={{ padding: '1rem', color: log.logout_at ? 'var(--text-primary)' : 'var(--success, #10b981)' }}>
-                          {log.logout_at ? `🚪 ${formatDateTime(logoutDate!)}` : '🟢 Aktywna (lub zamknięta karta)'}
-                        </td>
-                        <td style={{ padding: '1rem', color: 'var(--text-secondary)' }}>
-                          ⏱️ {durationText}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                      return (
+                        <tr 
+                          key={log.id} 
+                          style={{ 
+                            borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                            transition: 'background 0.2s'
+                          }}
+                          className="table-row-hover"
+                        >
+                          <td style={{ padding: '1rem', fontWeight: '500' }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              👤 {profile?.display_name || 'Nieznany użytkownik'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '1rem', color: 'var(--text-primary)' }}>
+                            📅 {formatDateTime(loginDate)}
+                          </td>
+                          <td style={{ padding: '1rem', color: log.logout_at ? 'var(--text-primary)' : 'var(--success, #10b981)' }}>
+                            {log.logout_at ? `🚪 ${formatDateTime(logoutDate!)}` : '🟢 Aktywna (lub zamknięta karta)'}
+                          </td>
+                          <td style={{ padding: '1rem', color: 'var(--text-secondary)' }}>
+                            ⏱️ {durationText}
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
                 </tbody>
               </table>
             )}
