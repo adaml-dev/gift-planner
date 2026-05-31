@@ -58,11 +58,11 @@ function extractFromJsonLd(html: string): Partial<{ name: string; description: s
 
 function getMeta(html: string, ...attrs: string[]): string | null {
   for (const attr of attrs) {
-    const regex = new RegExp(`<meta[^>]+(?:property|name)=["']${attr.replace('.', '\\.')}["'][^>]+content=["']([^"']+)["']`, 'i');
+    const regex = new RegExp(`<meta[^>]+(?:property|name|itemprop)=["']${attr.replace('.', '\\.')}["'][^>]+content=["']([^"']+)["']`, 'i');
     const match = regex.exec(html);
     if (match) return match[1].trim();
     // Try reversed attribute order
-    const regex2 = new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${attr.replace('.', '\\.')}["']`, 'i');
+    const regex2 = new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name|itemprop)=["']${attr.replace('.', '\\.')}["']`, 'i');
     const match2 = regex2.exec(html);
     if (match2) return match2[1].trim();
   }
@@ -76,7 +76,7 @@ function extractFromHtml(html: string): Partial<{ name: string; description: str
   const ogTitle = getMeta(html, 'og:title');
   const ogDesc = getMeta(html, 'og:description', 'description');
   const ogImage = getMeta(html, 'og:image');
-  const ogPrice = getMeta(html, 'og:price:amount', 'product:price:amount', 'twitter:data1');
+  const ogPrice = getMeta(html, 'og:price:amount', 'product:price:amount', 'price', 'priceAmount', 'twitter:data1');
 
   if (ogTitle) result.name = ogTitle;
   if (ogDesc) result.description = ogDesc.replace(/<[^>]+>/g, '').trim().slice(0, 300);
