@@ -180,23 +180,66 @@ serve(async (req) => {
     }
 
     let response: Response;
-    try {
-      response = await doFetch(fetchUrl);
-      if (!response.ok && !isEmpik) {
-        const proxyUrl = getGoogleTranslateProxyUrl(parsedUrl.toString());
-        response = await doFetch(proxyUrl);
+    const maxRetries = 2;
+
+    async function fetchWithRetry(target: string, retries: number): Promise<Response> {
+      for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+          const res = await doFetch(target);
+          if (res.ok) return res;
+          if (attempt < retries) {
+            await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+          } else {
+            return res;
+          }
+        } catch (err) {
+          if (attempt < retries) {
+            await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+          } else {
+            throw err;
+          }
+        }
       }
-    } catch (err) {
-      if (!isEmpik) {
+      throw new Error("Failed after retries");
+    }
+
+    if (isEmpik) {
+      try {
+        response = await fetchWithRetry(fetchUrl, maxRetries);
+        if (!response.ok) {
+          const directRes = await doFetch(parsedUrl.toString());
+          if (directRes.ok) {
+            response = directRes;
+          }
+        }
+      } catch (err) {
+        response = await doFetch(parsedUrl.toString());
+      }
+    } else {
+      try {
+        response = await doFetch(fetchUrl);
+        if (!response.ok) {
+          const proxyUrl = getGoogleTranslateProxyUrl(parsedUrl.toString());
+          response = await fetchWithRetry(proxyUrl, maxRetries);
+        }
+      } catch (err) {
         const proxyUrl = getGoogleTranslateProxyUrl(parsedUrl.toString());
-        response = await doFetch(proxyUrl);
-      } else {
-        throw err;
+        response = await fetchWithRetry(proxyUrl, maxRetries);
       }
     }
 
     if (!response.ok) {
-      return new Response(JSON.stringify({ error: `Failed to fetch URL: ${response.status}` }), {
+      let bodyText = "";
+      try {
+        bodyText = await response.text();
+      } catch (e) {
+        bodyText = "Could not read body: " + String(e);
+      }
+      return new Response(JSON.stringify({ 
+        error: `Failed to fetch URL: ${response.status}`,
+        status: response.status,
+        bodySnippet: bodyText.slice(0, 1000)
+      }), {
         status: 422,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
