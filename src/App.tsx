@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase, authAdminClient } from './supabase';
 import giftBanner from './assets/gift_banner.png';
-
-declare const __COMMIT_HASH__: string;
-declare const __COMMIT_DATE__: string;
+import versionInfo from './version.json';
 
 const generateUUID = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -235,6 +233,18 @@ function App() {
   // 4. Sync profile table in DB
   const syncProfile = async (u: any) => {
     try {
+      // Check if profile already exists in gp_profiles to avoid overwriting display_name
+      const { data: existing } = await supabase
+        .from('gp_profiles')
+        .select('id')
+        .eq('id', u.id)
+        .single();
+
+      if (existing) {
+        fetchProfiles();
+        return;
+      }
+
       const { data, error } = await supabase
         .from('gp_profiles')
         .upsert({
@@ -1318,7 +1328,7 @@ function App() {
             <img src={giftBanner} alt="Gift Planner Logo" width="300" height="200" style={{ objectFit: 'cover' }} />
             <h1>Gift Planner</h1>
             <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0.5rem 0', opacity: 0.7 }}>
-              v{__COMMIT_HASH__} ({__COMMIT_DATE__})
+              v{versionInfo.version} ({versionInfo.date})
             </p>
             <p>Wpisz 4-cyfrowy kod PIN, aby uzyskać dostęp do aplikacji rodzinnej.</p>
           </div>
@@ -1361,7 +1371,7 @@ function App() {
             <img src={giftBanner} alt="Gift Planner Logo" width="300" height="200" style={{ objectFit: 'cover' }} />
             <h1>Kim jesteś?</h1>
             <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0.5rem 0', opacity: 0.7 }}>
-              v{__COMMIT_HASH__} ({__COMMIT_DATE__})
+              v{versionInfo.version} ({versionInfo.date})
             </p>
             <p>Wybierz swoje imię z listy, aby wejść do aplikacji.</p>
           </div>
@@ -1481,7 +1491,7 @@ function App() {
           <div className="navbar-brand" onClick={() => { setView('dashboard'); setActiveOccasion(null); }} style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', cursor: 'pointer' }}>
             <span style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>🎁 Gift Planner</span>
             <span style={{ fontSize: '0.65rem', fontWeight: 'normal', color: 'var(--text-secondary)', opacity: 0.7 }}>
-              v{__COMMIT_HASH__} ({__COMMIT_DATE__})
+              v{versionInfo.version} ({versionInfo.date})
             </span>
           </div>
           <div className="navbar-user">
@@ -1706,11 +1716,16 @@ function App() {
                                     <button 
                                       className="btn btn-secondary" 
                                       style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
-                                      onClick={async () => {
-                                        if (window.confirm("Czy na pewno chcesz anulować ten zakup? Organizator wydarzenia zatwierdził już tę rezerwację.")) {
-                                          await handleUnbook(gift.id);
-                                          await fetchMyBookingsData();
-                                        }
+                                      onClick={() => {
+                                        setConfirmModal({
+                                          show: true,
+                                          title: 'Anuluj zakup',
+                                          message: 'Czy na pewno chcesz anulować ten zakup? Organizator wydarzenia zatwierdził już tę rezerwację.',
+                                          onConfirm: async () => {
+                                            await handleUnbook(gift.id);
+                                            await fetchMyBookingsData();
+                                          }
+                                        });
                                       }}
                                     >
                                       Anuluj
@@ -1896,11 +1911,16 @@ function App() {
                                     <button 
                                       className="btn btn-secondary" 
                                       style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem', color: 'var(--accent-red, #ef4444)', borderColor: 'rgba(239, 68, 68, 0.3)' }}
-                                      onClick={async () => {
-                                        if (window.confirm("Czy na pewno chcesz usunąć tę odrzuconą rezerwację ze swojej listy?")) {
-                                          await handleUnbook(gift.id);
-                                          await fetchMyBookingsData();
-                                        }
+                                      onClick={() => {
+                                        setConfirmModal({
+                                          show: true,
+                                          title: 'Usuń odrzuconą rezerwację',
+                                          message: 'Czy na pewno chcesz usunąć tę odrzuconą rezerwację ze swojej listy?',
+                                          onConfirm: async () => {
+                                            await handleUnbook(gift.id);
+                                            await fetchMyBookingsData();
+                                          }
+                                        });
                                       }}
                                     >
                                       Usuń z listy
