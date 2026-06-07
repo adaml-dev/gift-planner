@@ -3106,7 +3106,7 @@ function App() {
         <main className="container">
           <div className="dashboard-header">
             <div>
-              <h1>{dashboardTab === 'przechowalnia' ? 'Przechowalnia' : 'Planowane Okazje'}</h1>
+              <h1>Listy Życzeń i Wydarzeń</h1>
               <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
                 {dashboardTab === 'przechowalnia' 
                   ? 'Twórz listy życzeń dla dowolnej osoby bez przypisania do wydarzenia w kalendarzu.' 
