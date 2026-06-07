@@ -134,6 +134,12 @@ function App() {
   const [newLockerOwnerId, setNewLockerOwnerId] = useState('');
   const [hiddenSolenizants, setHiddenSolenizants] = useState<string[]>([]);
 
+  const [showAddFromLockerModal, setShowAddFromLockerModal] = useState(false);
+  const [addFromLockerSelectedGifts, setAddFromLockerSelectedGifts] = useState<string[]>([]);
+  const [addFromLockerLockerId, setAddFromLockerLockerId] = useState('');
+  const [showAddFromUnpurchasedModal, setShowAddFromUnpurchasedModal] = useState(false);
+  const [addFromUnpurchasedSelectedGifts, setAddFromUnpurchasedSelectedGifts] = useState<string[]>([]);
+
   const [showGiftModal, setShowGiftModal] = useState(false);
   const [newGiftName, setNewGiftName] = useState('');
   const [newGiftDesc, setNewGiftDesc] = useState('');
@@ -1004,6 +1010,89 @@ function App() {
       setView('occasion');
     }
     setLoading(false);
+  };
+
+  const getUnpurchasedGiftsForSolenizant = (solenizantName: string, solenizantId: string | null) => {
+    const solenizantOccasions = occasions.filter(occ => 
+      occ.id !== activeOccasion?.id &&
+      occ.title !== '__PRZECHOWALNIA__' &&
+      ((solenizantId && occ.owner_id === solenizantId) || 
+       (occ.owner_name.trim().toLowerCase() === solenizantName.trim().toLowerCase()))
+    );
+    const occIds = solenizantOccasions.map(occ => occ.id);
+    const solenizantGifts = allGifts.filter(g => occIds.includes(g.occasion_id));
+    const unpurchased = solenizantGifts.filter(gift => {
+      const giftBookings = bookings.filter(b => b.gift_id === gift.id);
+      const hasApproved = giftBookings.some(b => b.is_approved);
+      return !hasApproved;
+    });
+    return unpurchased;
+  };
+
+  const getLockerGiftsForSolenizant = (lockerId: string) => {
+    return allGifts.filter(g => g.occasion_id === lockerId);
+  };
+
+  const handleAddFromLocker = async () => {
+    if (addFromLockerSelectedGifts.length === 0 || !activeOccasion) return;
+    setLoading(true);
+    try {
+      const selectedItems = allGifts.filter(g => addFromLockerSelectedGifts.includes(g.id));
+      const giftsToInsert = selectedItems.map(g => ({
+        occasion_id: activeOccasion.id,
+        name: g.name,
+        description: g.description || null,
+        price: g.price || null,
+        url: g.url || null,
+        urls: g.urls || null,
+        suggested_by: user.id,
+        created_at: new Date().toISOString()
+      }));
+      const { error } = await supabase
+        .from('gp_gifts')
+        .insert(giftsToInsert);
+      if (error) throw error;
+      setToast({ message: `Pomyślnie dodano ${giftsToInsert.length} prezentów z Przechowalni.`, type: 'success' });
+      setShowAddFromLockerModal(false);
+      setAddFromLockerSelectedGifts([]);
+      await fetchGifts(activeOccasion.id);
+      await fetchAllGifts();
+    } catch (e: any) {
+      setToast({ message: 'Błąd podczas dodawania: ' + e.message, type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddFromUnpurchased = async () => {
+    if (addFromUnpurchasedSelectedGifts.length === 0 || !activeOccasion) return;
+    setLoading(true);
+    try {
+      const selectedItems = allGifts.filter(g => addFromUnpurchasedSelectedGifts.includes(g.id));
+      const giftsToInsert = selectedItems.map(g => ({
+        occasion_id: activeOccasion.id,
+        name: g.name,
+        description: g.description || null,
+        price: g.price || null,
+        url: g.url || null,
+        urls: g.urls || null,
+        suggested_by: user.id,
+        created_at: new Date().toISOString()
+      }));
+      const { error } = await supabase
+        .from('gp_gifts')
+        .insert(giftsToInsert);
+      if (error) throw error;
+      setToast({ message: `Pomyślnie dodano ${giftsToInsert.length} niekupionych prezentów.`, type: 'success' });
+      setShowAddFromUnpurchasedModal(false);
+      setAddFromUnpurchasedSelectedGifts([]);
+      await fetchGifts(activeOccasion.id);
+      await fetchAllGifts();
+    } catch (e: any) {
+      setToast({ message: 'Błąd podczas dodawania: ' + e.message, type: 'error' });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSavePin = async (e: React.FormEvent) => {
@@ -3481,6 +3570,36 @@ function App() {
                 <button className="btn btn-primary" style={{ flexShrink: 0 }} onClick={() => openGiftModal(false)}>
                   🎁 Dodaj Prezent
                 </button>
+                {activeOccasion.title !== '__PRZECHOWALNIA__' && (
+                  <>
+                    <button 
+                      className="btn btn-secondary" 
+                      style={{ flexShrink: 0 }} 
+                      onClick={() => {
+                        const defaultLocker = occasions.find(occ => 
+                          occ.title === '__PRZECHOWALNIA__' && 
+                          ((activeOccasion.owner_id && occ.owner_id === activeOccasion.owner_id) || 
+                           (occ.owner_name.trim().toLowerCase() === activeOccasion.owner_name.trim().toLowerCase()))
+                        );
+                        setAddFromLockerLockerId(defaultLocker?.id || '');
+                        setAddFromLockerSelectedGifts([]);
+                        setShowAddFromLockerModal(true);
+                      }}
+                    >
+                      📦 Dodaj z Przechowalni
+                    </button>
+                    <button 
+                      className="btn btn-secondary" 
+                      style={{ flexShrink: 0 }} 
+                      onClick={() => {
+                        setAddFromUnpurchasedSelectedGifts([]);
+                        setShowAddFromUnpurchasedModal(true);
+                      }}
+                    >
+                      📅 Dodaj z niekupionych
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -3535,9 +3654,39 @@ function App() {
                       <div className="empty-state-icon">🎁</div>
                       <h4>Brak prezentów na liście</h4>
                       <p style={{ marginBottom: '1.5rem' }}>Dodaj prezenty, które chcesz podarować lub otrzymać!</p>
-                      <button className="btn btn-primary" onClick={() => openGiftModal(false)}>
-                        Dodaj prezent
-                      </button>
+                      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+                        <button className="btn btn-primary" onClick={() => openGiftModal(false)}>
+                          Dodaj prezent
+                        </button>
+                        {activeOccasion.title !== '__PRZECHOWALNIA__' && (
+                          <>
+                            <button 
+                              className="btn btn-secondary" 
+                              onClick={() => {
+                                const defaultLocker = occasions.find(occ => 
+                                  occ.title === '__PRZECHOWALNIA__' && 
+                                  ((activeOccasion.owner_id && occ.owner_id === activeOccasion.owner_id) || 
+                                   (occ.owner_name.trim().toLowerCase() === activeOccasion.owner_name.trim().toLowerCase()))
+                                );
+                                setAddFromLockerLockerId(defaultLocker?.id || '');
+                                setAddFromLockerSelectedGifts([]);
+                                setShowAddFromLockerModal(true);
+                              }}
+                            >
+                              📦 Dodaj z Przechowalni
+                            </button>
+                            <button 
+                              className="btn btn-secondary" 
+                              onClick={() => {
+                                setAddFromUnpurchasedSelectedGifts([]);
+                                setShowAddFromUnpurchasedModal(true);
+                              }}
+                            >
+                              📅 Dodaj z niekupionych
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   ) : (
                     renderGiftsTable(solenizantGifts)
@@ -5421,6 +5570,192 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* ----------------- ADD FROM LOCKER MODAL ----------------- */}
+      {showAddFromLockerModal && activeOccasion && (
+        <div className="modal-overlay">
+          <div className="glass-panel modal-content" style={{ maxHeight: '90vh', overflowY: 'auto' }}>
+            <div className="modal-header">
+              <h2>Dodaj prezenty z Przechowalni</h2>
+              <button className="close-btn" onClick={() => setShowAddFromLockerModal(false)}>×</button>
+            </div>
+            
+            <div className="form-group">
+              <label>Wybierz Przechowalnię</label>
+              <select
+                className="form-control"
+                value={addFromLockerLockerId}
+                onChange={e => {
+                  setAddFromLockerLockerId(e.target.value);
+                  setAddFromLockerSelectedGifts([]);
+                }}
+              >
+                <option value="">-- Wybierz Przechowalnię --</option>
+                {occasions.filter(o => o.title === '__PRZECHOWALNIA__').map(o => (
+                  <option key={o.id} value={o.id}>{o.owner_name}</option>
+                ))}
+              </select>
+            </div>
+
+            {addFromLockerLockerId && (() => {
+              const lockerGifts = getLockerGiftsForSolenizant(addFromLockerLockerId);
+              return (
+                <div style={{ marginTop: '1rem' }}>
+                  {lockerGifts.length === 0 ? (
+                    <p style={{ color: 'var(--text-secondary)', textAlign: 'center', margin: '2rem 0' }}>
+                      Brak prezentów w wybranej Przechowalni.
+                    </p>
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem', justifyContent: 'flex-end' }}>
+                        <button 
+                          type="button" 
+                          className="btn btn-secondary" 
+                          style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }} 
+                          onClick={() => setAddFromLockerSelectedGifts(lockerGifts.map(g => g.id))}
+                        >
+                          Zaznacz wszystkie
+                        </button>
+                        <button 
+                          type="button" 
+                          className="btn btn-secondary" 
+                          style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }} 
+                          onClick={() => setAddFromLockerSelectedGifts([])}
+                        >
+                          Odznacz wszystkie
+                        </button>
+                      </div>
+                      <div style={{ maxHeight: '350px', overflowY: 'auto', border: '1px solid var(--card-border)', borderRadius: '8px', padding: '0.5rem', background: 'rgba(0,0,0,0.1)' }}>
+                        {lockerGifts.map(g => (
+                          <label key={g.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.5rem', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.05)', color: 'white', textTransform: 'none', margin: 0 }}>
+                            <input 
+                              type="checkbox"
+                              checked={addFromLockerSelectedGifts.includes(g.id)}
+                              onChange={e => {
+                                if (e.target.checked) {
+                                  setAddFromLockerSelectedGifts([...addFromLockerSelectedGifts, g.id]);
+                                } else {
+                                  setAddFromLockerSelectedGifts(addFromLockerSelectedGifts.filter(id => id !== g.id));
+                                }
+                              }}
+                              style={{ width: '18px', height: '18px' }}
+                            />
+                            <div>
+                              <strong>{g.name}</strong>
+                              {g.price ? <span style={{ color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>({g.price} zł)</span> : null}
+                              {g.description ? <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0 0' }}>{g.description}</p> : null}
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
+
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setShowAddFromLockerModal(false)}>
+                Anuluj
+              </button>
+              <button 
+                type="button" 
+                className="btn btn-primary" 
+                disabled={loading || addFromLockerSelectedGifts.length === 0} 
+                onClick={handleAddFromLocker}
+              >
+                {loading ? 'Dodawanie...' : `Dodaj zaznaczone (${addFromLockerSelectedGifts.length})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------- ADD FROM UNPURCHASED MODAL ----------------- */}
+      {showAddFromUnpurchasedModal && activeOccasion && (() => {
+        const unpurchasedGifts = getUnpurchasedGiftsForSolenizant(activeOccasion.owner_name, activeOccasion.owner_id || null);
+        return (
+          <div className="modal-overlay">
+            <div className="glass-panel modal-content" style={{ maxHeight: '90vh', overflowY: 'auto' }}>
+              <div className="modal-header">
+                <h2>Dodaj z niekupionych prezentów starych wydarzeń</h2>
+                <button className="close-btn" onClick={() => setShowAddFromUnpurchasedModal(false)}>×</button>
+              </div>
+              
+              <div style={{ marginTop: '0.5rem' }}>
+                {unpurchasedGifts.length === 0 ? (
+                  <p style={{ color: 'var(--text-secondary)', textAlign: 'center', margin: '2rem 0' }}>
+                    Brak niekupionych prezentów z poprzednich wydarzeń tego solenizanta.
+                  </p>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem', justifyContent: 'flex-end' }}>
+                      <button 
+                        type="button" 
+                        className="btn btn-secondary" 
+                        style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }} 
+                        onClick={() => setAddFromUnpurchasedSelectedGifts(unpurchasedGifts.map(g => g.id))}
+                      >
+                        Zaznacz wszystkie
+                      </button>
+                      <button 
+                        type="button" 
+                        className="btn btn-secondary" 
+                        style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }} 
+                        onClick={() => setAddFromUnpurchasedSelectedGifts([])}
+                      >
+                        Odznacz wszystkie
+                      </button>
+                    </div>
+                    <div style={{ maxHeight: '400px', overflowY: 'auto', border: '1px solid var(--card-border)', borderRadius: '8px', padding: '0.5rem', background: 'rgba(0,0,0,0.1)' }}>
+                      {unpurchasedGifts.map(g => {
+                        const occ = occasions.find(o => o.id === g.occasion_id);
+                        const occInfo = occ ? `${occ.title} (${formatDate(occ.date)})` : 'Poprzednie wydarzenie';
+                        return (
+                          <label key={g.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.6rem 0.5rem', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.05)', color: 'white', textTransform: 'none', margin: 0 }}>
+                            <input 
+                              type="checkbox"
+                              checked={addFromUnpurchasedSelectedGifts.includes(g.id)}
+                              onChange={e => {
+                                if (e.target.checked) {
+                                  setAddFromUnpurchasedSelectedGifts([...addFromUnpurchasedSelectedGifts, g.id]);
+                                } else {
+                                  setAddFromUnpurchasedSelectedGifts(addFromUnpurchasedSelectedGifts.filter(id => id !== g.id));
+                                }
+                              }}
+                              style={{ width: '18px', height: '18px' }}
+                            />
+                            <div>
+                              <strong>{g.name}</strong>
+                              {g.price ? <span style={{ color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>({g.price} zł)</span> : null}
+                              <div style={{ fontSize: '0.75rem', color: 'var(--primary)', marginTop: '0.15rem' }}>z: {occInfo}</div>
+                              {g.description ? <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0 0' }}>{g.description}</p> : null}
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowAddFromUnpurchasedModal(false)}>
+                  Anuluj
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-primary" 
+                  disabled={loading || addFromUnpurchasedSelectedGifts.length === 0} 
+                  onClick={handleAddFromUnpurchased}
+                >
+                  {loading ? 'Dodawanie...' : `Dodaj zaznaczone (${addFromUnpurchasedSelectedGifts.length})`}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ----------------- CONFIRMATION MODAL ----------------- */}
       {confirmModal.show && (
