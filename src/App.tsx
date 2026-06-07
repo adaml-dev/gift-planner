@@ -109,7 +109,7 @@ function App() {
   // Modals / Form states
   const [showOccasionModal, setShowOccasionModal] = useState(false);
   const [editingOccasion, setEditingOccasion] = useState<Occasion | null>(null);
-  const [dashboardTab, setDashboardTab] = useState<'przechowalnia' | 'upcoming' | 'archived'>('przechowalnia');
+  const [dashboardTab, setDashboardTab] = useState<'przechowalnia' | 'upcoming' | 'archived'>('upcoming');
   const [newOccasionTitle, setNewOccasionTitle] = useState('');
   const [newOccasionOwnerName, setNewOccasionOwnerName] = useState('');
   const [newOccasionOwnerId, setNewOccasionOwnerId] = useState('');
@@ -3219,16 +3219,16 @@ function App() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.5rem' }}>
             <div className="tab-nav" style={{ margin: 0 }}>
               <button 
-                className={`tab-btn ${dashboardTab === 'przechowalnia' ? 'active' : ''}`} 
-                onClick={() => setDashboardTab('przechowalnia')}
-              >
-                📦 Przechowalnia ({occasions.filter(o => o.title === '__PRZECHOWALNIA__').length})
-              </button>
-              <button 
                 className={`tab-btn ${dashboardTab === 'upcoming' ? 'active' : ''}`} 
                 onClick={() => setDashboardTab('upcoming')}
               >
                 📅 Nadchodzące ({upcomingOccasions.length})
+              </button>
+              <button 
+                className={`tab-btn ${dashboardTab === 'przechowalnia' ? 'active' : ''}`} 
+                onClick={() => setDashboardTab('przechowalnia')}
+              >
+                📦 Przechowalnia ({occasions.filter(o => o.title === '__PRZECHOWALNIA__').length})
               </button>
               <button 
                 className={`tab-btn ${dashboardTab === 'archived' ? 'active' : ''}`} 
