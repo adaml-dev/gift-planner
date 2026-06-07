@@ -82,7 +82,7 @@ function App() {
   const [initializing, setInitializing] = useState(true);
 
   // App navigation & core state
-  const [view, setView] = useState<'dashboard' | 'occasion' | 'my-bookings' | 'login-logs' | 'przechowalnia'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'occasion' | 'my-bookings' | 'login-logs'>('dashboard');
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [occasions, setOccasions] = useState<Occasion[]>([]);
   const [activeOccasion, setActiveOccasion] = useState<Occasion | null>(null);
@@ -109,7 +109,7 @@ function App() {
   // Modals / Form states
   const [showOccasionModal, setShowOccasionModal] = useState(false);
   const [editingOccasion, setEditingOccasion] = useState<Occasion | null>(null);
-  const [dashboardTab, setDashboardTab] = useState<'upcoming' | 'archived'>('upcoming');
+  const [dashboardTab, setDashboardTab] = useState<'przechowalnia' | 'upcoming' | 'archived'>('przechowalnia');
   const [newOccasionTitle, setNewOccasionTitle] = useState('');
   const [newOccasionOwnerName, setNewOccasionOwnerName] = useState('');
   const [newOccasionOwnerId, setNewOccasionOwnerId] = useState('');
@@ -2389,24 +2389,6 @@ function App() {
               <span className="hide-mobile">!</span>
             </span>
             <button 
-              className={`btn ${view === 'przechowalnia' ? 'btn-primary' : 'btn-secondary'}`} 
-              style={{ 
-                padding: '0.5rem 1rem', 
-                fontSize: '0.85rem',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.4rem'
-              }} 
-              onClick={() => {
-                setView('przechowalnia');
-                setActiveOccasion(null);
-              }}
-            >
-              <span>📦</span>
-              <span className="hide-mobile">Przechowalnia</span>
-              <span className="show-mobile-inline">Przechowalnia</span>
-            </button>
-            <button 
               className={`btn ${view === 'my-bookings' ? 'btn-primary' : 'btn-secondary'}`} 
               style={{ 
                 padding: '0.5rem 1rem', 
@@ -3117,28 +3099,103 @@ function App() {
         </main>
       )}
 
-      {/* ----------------- PRZECHOWALNIA VIEW ----------------- */}
-      {view === 'przechowalnia' && (() => {
-        const lockerOccasions = occasions.filter(occ => occ.title === '__PRZECHOWALNIA__');
-        return (
-          <main className="container">
-            <div className="dashboard-header">
-              <div>
-                <h1>Przechowalnia</h1>
-                <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
-                  Twórz listy życzeń dla dowolnej osoby bez przypisania do wydarzenia w kalendarzu.
-                </p>
-              </div>
-              <div>
-                <button className="btn btn-primary" onClick={() => setShowCreateLockerModal(true)}>
-                  ➕ Utwórz Listę
-                </button>
-              </div>
+
+
+      {/* ----------------- DASHBOARD VIEW ----------------- */}
+      {view === 'dashboard' && (
+        <main className="container">
+          <div className="dashboard-header">
+            <div>
+              <h1>{dashboardTab === 'przechowalnia' ? 'Przechowalnia' : 'Planowane Okazje'}</h1>
+              <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
+                {dashboardTab === 'przechowalnia' 
+                  ? 'Twórz listy życzeń dla dowolnej osoby bez przypisania do wydarzenia w kalendarzu.' 
+                  : 'Przeglądaj wydarzenia znajomych i rodziny lub stwórz własne.'}
+              </p>
             </div>
+            <div>
+              {dashboardTab === 'przechowalnia' ? (
+                <button className="btn btn-primary" onClick={() => setShowCreateLockerModal(true)}>
+                  ➕ Nowa Lista
+                </button>
+              ) : (
+                <button className="btn btn-primary" onClick={openNewOccasionModal}>
+                  ➕ Nowe Wydarzenie
+                </button>
+              )}
+            </div>
+          </div>
 
-            {loading && <div style={{ textAlign: 'center', padding: '2rem' }}>Ładowanie Przechowalni...</div>}
+          {/* Dashboard Tabs & View Toggle */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.5rem' }}>
+            <div className="tab-nav" style={{ margin: 0 }}>
+              <button 
+                className={`tab-btn ${dashboardTab === 'przechowalnia' ? 'active' : ''}`} 
+                onClick={() => setDashboardTab('przechowalnia')}
+              >
+                📦 Przechowalnia ({occasions.filter(o => o.title === '__PRZECHOWALNIA__').length})
+              </button>
+              <button 
+                className={`tab-btn ${dashboardTab === 'upcoming' ? 'active' : ''}`} 
+                onClick={() => setDashboardTab('upcoming')}
+              >
+                📅 Nadchodzące ({upcomingOccasions.length})
+              </button>
+              <button 
+                className={`tab-btn ${dashboardTab === 'archived' ? 'active' : ''}`} 
+                onClick={() => setDashboardTab('archived')}
+              >
+                🗄️ Archiwum i minione ({archivedOrPastOccasions.length})
+              </button>
+            </div>
+          </div>
 
-            {!loading && lockerOccasions.length === 0 && (
+          {myRejectedBookingsCount > 0 && (
+            <div 
+              className="alert alert-warning" 
+              style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center', 
+                marginBottom: '1.5rem', 
+                background: 'rgba(239, 68, 68, 0.1)', 
+                border: '1px solid rgba(239, 68, 68, 0.25)', 
+                color: 'var(--accent-red, #f87171)',
+                padding: '0.8rem 1rem',
+                borderRadius: '8px',
+                fontSize: '0.9rem'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <span style={{ fontSize: '1.1rem' }}>⚠️</span>
+                <span>
+                  Jedna lub więcej Twoich rezerwacji zostało <strong>odrzuconych</strong>, ponieważ organizator zatwierdził zakup przez inną osobę.
+                </span>
+              </div>
+              <button 
+                className="btn btn-secondary" 
+                style={{ 
+                  padding: '0.25rem 0.6rem', 
+                  fontSize: '0.75rem', 
+                  borderColor: 'rgba(239, 68, 68, 0.3)',
+                  color: 'var(--text-primary, white)',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  cursor: 'pointer'
+                }}
+                onClick={openMyBookings}
+              >
+                Pokaż szczegóły
+              </button>
+            </div>
+          )}
+
+          {errorMsg && <div className="alert alert-danger">{errorMsg}</div>}
+
+          {loading && <div style={{ textAlign: 'center', padding: '2rem' }}>Ładowanie...</div>}
+
+          {!loading && dashboardTab === 'przechowalnia' && (() => {
+            const lockerOccasions = occasions.filter(occ => occ.title === '__PRZECHOWALNIA__');
+            return lockerOccasions.length === 0 ? (
               <div className="glass-panel empty-state">
                 <div className="empty-state-icon">📦</div>
                 <h3>Brak list w Przechowalni</h3>
@@ -3149,9 +3206,7 @@ function App() {
                   Utwórz pierwszą listę
                 </button>
               </div>
-            )}
-
-            {!loading && lockerOccasions.length > 0 && (
+            ) : (
               <div style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
@@ -3222,90 +3277,10 @@ function App() {
                   );
                 })}
               </div>
-            )}
-          </main>
-        );
-      })()}
+            );
+          })()}
 
-      {/* ----------------- DASHBOARD VIEW ----------------- */}
-      {view === 'dashboard' && (
-        <main className="container">
-          <div className="dashboard-header">
-            <div>
-              <h1>Planowane Okazje</h1>
-              <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
-                Przeglądaj wydarzenia znajomych i rodziny lub stwórz własne.
-              </p>
-            </div>
-            <div>
-              <button className="btn btn-primary" onClick={openNewOccasionModal}>
-                ➕ Nowe Wydarzenie
-              </button>
-            </div>
-          </div>
-
-          {/* Dashboard Tabs & View Toggle */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.5rem' }}>
-            <div className="tab-nav" style={{ margin: 0 }}>
-              <button 
-                className={`tab-btn ${dashboardTab === 'upcoming' ? 'active' : ''}`} 
-                onClick={() => setDashboardTab('upcoming')}
-              >
-                📅 Nadchodzące ({upcomingOccasions.length})
-              </button>
-              <button 
-                className={`tab-btn ${dashboardTab === 'archived' ? 'active' : ''}`} 
-                onClick={() => setDashboardTab('archived')}
-              >
-                🗄️ Archiwum i minione ({archivedOrPastOccasions.length})
-              </button>
-            </div>
-          </div>
-
-          {myRejectedBookingsCount > 0 && (
-            <div 
-              className="alert alert-warning" 
-              style={{ 
-                display: 'flex', 
-                justifyContent: 'space-between', 
-                alignItems: 'center', 
-                marginBottom: '1.5rem', 
-                background: 'rgba(239, 68, 68, 0.1)', 
-                border: '1px solid rgba(239, 68, 68, 0.25)', 
-                color: 'var(--accent-red, #f87171)',
-                padding: '0.8rem 1rem',
-                borderRadius: '8px',
-                fontSize: '0.9rem'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                <span style={{ fontSize: '1.1rem' }}>⚠️</span>
-                <span>
-                  Jedna lub więcej Twoich rezerwacji zostało <strong>odrzuconych</strong>, ponieważ organizator zatwierdził zakup przez inną osobę.
-                </span>
-              </div>
-              <button 
-                className="btn btn-secondary" 
-                style={{ 
-                  padding: '0.25rem 0.6rem', 
-                  fontSize: '0.75rem', 
-                  borderColor: 'rgba(239, 68, 68, 0.3)',
-                  color: 'var(--text-primary, white)',
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  cursor: 'pointer'
-                }}
-                onClick={openMyBookings}
-              >
-                Pokaż szczegóły
-              </button>
-            </div>
-          )}
-
-          {errorMsg && <div className="alert alert-danger">{errorMsg}</div>}
-
-          {loading && <div style={{ textAlign: 'center', padding: '2rem' }}>Ładowanie wydarzeń...</div>}
-
-          {!loading && filteredOccasions.length === 0 && (
+          {!loading && dashboardTab !== 'przechowalnia' && filteredOccasions.length === 0 && (
             <div className="glass-panel empty-state">
               <div className="empty-state-icon">
                 {dashboardTab === 'upcoming' ? '🎂' : '🗄️'}
@@ -3326,7 +3301,7 @@ function App() {
             </div>
           )}
 
-          {!loading && filteredOccasions.length > 0 && (
+          {!loading && dashboardTab !== 'przechowalnia' && filteredOccasions.length > 0 && (
             <div className="table-responsive">
               <table className="compact-table">
                 <thead>
@@ -3401,10 +3376,9 @@ function App() {
         <main className="container">
           <button className="back-link" onClick={() => { 
             if (activeOccasion.title === '__PRZECHOWALNIA__') {
-              setView('przechowalnia');
-            } else {
-              setView('dashboard');
+              setDashboardTab('przechowalnia');
             }
+            setView('dashboard');
             setActiveOccasion(null); 
           }}>
             {activeOccasion.title === '__PRZECHOWALNIA__' ? '← Powrót do Przechowalni' : '← Powrót do pulpitu'}
