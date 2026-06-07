@@ -121,6 +121,7 @@ function App() {
   const [newOccasionInvitedIds, setNewOccasionInvitedIds] = useState<string[]>([]);
   const [newOccasionIsDraft, setNewOccasionIsDraft] = useState(true);
   const [newOccasionDraftAllowedIds, setNewOccasionDraftAllowedIds] = useState<string[]>([]);
+  const [copyUnpurchasedGifts, setCopyUnpurchasedGifts] = useState(true);
 
   const [showGiftModal, setShowGiftModal] = useState(false);
   const [newGiftName, setNewGiftName] = useState('');
@@ -839,6 +840,7 @@ function App() {
     setNewOccasionInvitedIds([]);
     setNewOccasionIsDraft(true);
     setNewOccasionDraftAllowedIds([]);
+    setCopyUnpurchasedGifts(true);
   };
 
   const closeOccasionModal = () => {
@@ -978,7 +980,7 @@ function App() {
         setToast({ message: 'Okazja została zaktualizowana!', type: 'success' });
       }
     } else {
-      const { error } = await supabase
+      const { data: newOccasion, error } = await supabase
         .from('gp_occasions')
         .insert({
           title: newOccasionTitle,
@@ -994,11 +996,61 @@ function App() {
           invited_user_ids: newOccasionInvitedIds,
           is_draft: newOccasionIsDraft,
           draft_allowed_user_ids: newOccasionDraftAllowedIds
-        });
+        })
+        .select()
+        .single();
 
       if (error) {
         setToast({ message: 'Nie udało się utworzyć okazji: ' + error.message, type: 'error' });
       } else {
+        if (copyUnpurchasedGifts && newOccasion) {
+          try {
+            const pastOccasions = occasions.filter(occ => 
+              (newOccasionOwnerId && occ.owner_id === newOccasionOwnerId) ||
+              (occ.owner_name.trim().toLowerCase() === newOccasionOwnerName.trim().toLowerCase())
+            );
+            const pastOccasionIds = pastOccasions.map(o => o.id);
+            if (pastOccasionIds.length > 0) {
+              const unpurchasedGifts = allGifts.filter(gift => 
+                pastOccasionIds.includes(gift.occasion_id) &&
+                !bookings.some(b => b.gift_id === gift.id && b.is_approved)
+              );
+              if (unpurchasedGifts.length > 0) {
+                const uniqueGiftsMap = new Map();
+                unpurchasedGifts.forEach(g => {
+                  const nameKey = g.name.trim().toLowerCase();
+                  if (!uniqueGiftsMap.has(nameKey)) {
+                    uniqueGiftsMap.set(nameKey, g);
+                  }
+                });
+                const uniqueUnpurchasedGifts = Array.from(uniqueGiftsMap.values());
+                const giftsToInsert = uniqueUnpurchasedGifts.map(g => ({
+                  occasion_id: newOccasion.id,
+                  name: g.name,
+                  description: g.description || null,
+                  price: g.price || null,
+                  url: g.url || null,
+                  urls: g.urls || [],
+                  suggested_by: g.suggested_by || user.id,
+                  is_secret: g.is_secret || false
+                }));
+                if (giftsToInsert.length > 0) {
+                  const { error: insertGiftsError } = await supabase
+                    .from('gp_gifts')
+                    .insert(giftsToInsert);
+                  if (insertGiftsError) {
+                    console.error('Error copying gifts:', insertGiftsError);
+                    setToast({ message: 'Okazja utworzona, ale nie udało się skopiować prezentów: ' + insertGiftsError.message, type: 'error' });
+                  } else {
+                    await fetchAllGifts();
+                  }
+                }
+              }
+            }
+          } catch (copyErr: any) {
+            console.error('Error copying gifts:', copyErr);
+          }
+        }
         setShowOccasionModal(false);
         clearOccasionForm();
         fetchOccasions();
@@ -2144,6 +2196,27 @@ function App() {
     });
 
   const filteredOccasions = dashboardTab === 'upcoming' ? upcomingOccasions : archivedOrPastOccasions;
+
+  const pastSolenizants = (() => {
+    const list: { owner_name: string; owner_id: string }[] = [];
+    const keys = new Set<string>();
+    occasions.forEach(occ => {
+      if (!occ.owner_name) return;
+      const name = occ.owner_name.trim();
+      const id = occ.owner_id || '';
+      const key = `${name.toLowerCase()}||${id}`;
+      if (!keys.has(key)) {
+        keys.add(key);
+        list.push({ owner_name: name, owner_id: id });
+      }
+    });
+    return list;
+  })();
+
+  const isPastSolenizantSelected = !editingOccasion && (
+    (newOccasionOwnerName.trim() && pastSolenizants.some(ps => ps.owner_name.toLowerCase() === newOccasionOwnerName.trim().toLowerCase())) ||
+    (newOccasionOwnerId && pastSolenizants.some(ps => ps.owner_id === newOccasionOwnerId))
+  );
 
   return (
     <>
@@ -3435,6 +3508,49 @@ function App() {
                 />
               </div>
 
+              {!editingOccasion && pastSolenizants.length > 0 && (
+                <div style={{ marginTop: '-0.5rem', marginBottom: '1rem' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    Szybki wybór z poprzednich okazji:
+                  </span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.35rem' }}>
+                    {pastSolenizants.map((ps, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        style={{
+                          padding: '0.4rem 0.8rem',
+                          fontSize: '0.85rem',
+                          borderRadius: '20px',
+                          background: 'rgba(170, 59, 255, 0.1)',
+                          border: '1px solid rgba(170, 59, 255, 0.3)',
+                          color: '#e0b0ff',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.3rem'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = 'rgba(170, 59, 255, 0.25)';
+                          e.currentTarget.style.borderColor = 'rgba(170, 59, 255, 0.5)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = 'rgba(170, 59, 255, 0.1)';
+                          e.currentTarget.style.borderColor = 'rgba(170, 59, 255, 0.3)';
+                        }}
+                        onClick={() => {
+                          setNewOccasionOwnerName(ps.owner_name);
+                          setNewOccasionOwnerId(ps.owner_id);
+                        }}
+                      >
+                        👤 {ps.owner_name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="form-group">
                 <label>Konto solenizanta w aplikacji (opcjonalnie)</label>
                 <select 
@@ -3451,6 +3567,48 @@ function App() {
                   Wskazanie konta sprawi, że rezerwacje i pomysły-niespodzianki będą przed tą osobą ukryte.
                 </p>
               </div>
+
+              {isPastSolenizantSelected && (
+                <div 
+                  className="form-group" 
+                  style={{ 
+                    marginTop: '1rem', 
+                    marginBottom: '1.25rem',
+                    padding: '0.75rem 1rem',
+                    background: 'rgba(170, 59, 255, 0.08)',
+                    borderRadius: '10px',
+                    border: '1px solid rgba(170, 59, 255, 0.2)',
+                    display: 'flex',
+                    flexDirection: 'column'
+                  }}
+                >
+                  <label 
+                    style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '0.75rem', 
+                      cursor: 'pointer', 
+                      textTransform: 'none', 
+                      color: '#e0b0ff', 
+                      fontWeight: 'normal',
+                      margin: 0
+                    }}
+                  >
+                    <input 
+                      type="checkbox" 
+                      checked={copyUnpurchasedGifts} 
+                      onChange={e => setCopyUnpurchasedGifts(e.target.checked)}
+                      style={{ 
+                        width: '18px', 
+                        height: '18px', 
+                        accentColor: 'var(--primary)',
+                        cursor: 'pointer' 
+                      }}
+                    />
+                    czy dołożyć poprzednio niekupione prezenty do listy życzeń?
+                  </label>
+                </div>
+              )}
 
               <div className="form-row">
                 <div className="form-group">
