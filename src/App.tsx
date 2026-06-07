@@ -82,7 +82,7 @@ function App() {
   const [initializing, setInitializing] = useState(true);
 
   // App navigation & core state
-  const [view, setView] = useState<'dashboard' | 'occasion' | 'my-bookings' | 'login-logs'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'occasion' | 'my-bookings' | 'login-logs' | 'przechowalnia'>('dashboard');
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [occasions, setOccasions] = useState<Occasion[]>([]);
   const [activeOccasion, setActiveOccasion] = useState<Occasion | null>(null);
@@ -122,6 +122,17 @@ function App() {
   const [newOccasionIsDraft, setNewOccasionIsDraft] = useState(true);
   const [newOccasionDraftAllowedIds, setNewOccasionDraftAllowedIds] = useState<string[]>([]);
   const [copyUnpurchasedGifts, setCopyUnpurchasedGifts] = useState(true);
+
+  // Locker ("Przechowalnia") states
+  const [selectedGifts, setSelectedGifts] = useState<string[]>([]);
+  const [showMoveModal, setShowMoveModal] = useState(false);
+  const [moveTargetId, setMoveTargetId] = useState('');
+  const [moveNewOwnerName, setMoveNewOwnerName] = useState('');
+  const [moveNewOwnerId, setMoveNewOwnerId] = useState('');
+  const [showCreateLockerModal, setShowCreateLockerModal] = useState(false);
+  const [newLockerOwnerName, setNewLockerOwnerName] = useState('');
+  const [newLockerOwnerId, setNewLockerOwnerId] = useState('');
+  const [hiddenSolenizants, setHiddenSolenizants] = useState<string[]>([]);
 
   const [showGiftModal, setShowGiftModal] = useState(false);
   const [newGiftName, setNewGiftName] = useState('');
@@ -258,8 +269,13 @@ function App() {
       fetchBookings();
       fetchAllGifts();
       fetchAllSurprises();
+      fetchHiddenSolenizants();
     }
   }, [user]);
+
+  useEffect(() => {
+    setSelectedGifts([]);
+  }, [activeOccasion, view]);
 
   // Log login on user auth state change
   useEffect(() => {
@@ -800,6 +816,194 @@ function App() {
         setLoading(false);
       }
     });
+  };
+
+  const fetchHiddenSolenizants = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('gp_settings')
+        .select('*')
+        .eq('key', 'hidden_solenizants')
+        .maybeSingle();
+      if (!error && data) {
+        const parsed = JSON.parse(data.value);
+        if (Array.isArray(parsed)) {
+          setHiddenSolenizants(parsed);
+        }
+      }
+    } catch (e) {
+      console.error('Error fetching hidden solenizants:', e);
+    }
+  };
+
+  const handleHideSolenizant = async (solenizant: { owner_name: string; owner_id: string | null }, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const key = `${solenizant.owner_name.toLowerCase()}||${solenizant.owner_id || ''}`;
+    const newHiddenList = [...hiddenSolenizants, key];
+    const { error } = await supabase
+      .from('gp_settings')
+      .upsert({ key: 'hidden_solenizants', value: JSON.stringify(newHiddenList) });
+    if (error) {
+      setToast({ message: 'Błąd ukrywania: ' + error.message, type: 'error' });
+    } else {
+      setHiddenSolenizants(newHiddenList);
+      setToast({ message: `Solenizant ${solenizant.owner_name} został ukryty.`, type: 'success' });
+    }
+  };
+
+  const handleDeleteGiftsBulk = async () => {
+    if (selectedGifts.length === 0) return;
+    setConfirmModal({
+      show: true,
+      title: 'Usuń zaznaczone prezenty',
+      message: `Czy na pewno chcesz trwale usunąć zaznaczone prezenty (${selectedGifts.length})?`,
+      onConfirm: async () => {
+        setLoading(true);
+        const { error: errorGifts } = await supabase
+          .from('gp_gifts')
+          .delete()
+          .in('id', selectedGifts);
+        const { error: errorSurprises } = await supabase
+          .from('gp_surprises')
+          .delete()
+          .in('id', selectedGifts);
+        if (errorGifts || errorSurprises) {
+          setToast({ message: 'Wystąpił błąd podczas usuwania niektórych prezentów', type: 'error' });
+        } else {
+          setToast({ message: 'Pomyślnie usunięto zaznaczone prezenty', type: 'success' });
+          setSelectedGifts([]);
+          if (activeOccasion) {
+            await fetchGifts(activeOccasion.id);
+            await fetchSurprises(activeOccasion.id);
+          }
+          await fetchAllGifts();
+          await fetchAllSurprises();
+          await fetchBookings();
+        }
+        setLoading(false);
+      }
+    });
+  };
+
+  const handleMoveGifts = async (targetOccasionId: string, newOwnerName: string, newOwnerId: string) => {
+    if (selectedGifts.length === 0) return;
+    setLoading(true);
+    try {
+      let destOccasionId = targetOccasionId;
+      if (destOccasionId === 'new' || !destOccasionId) {
+        if (!newOwnerName.trim()) {
+          setToast({ message: 'Musisz podać imię właściciela nowej Przechowalni!', type: 'error' });
+          setLoading(false);
+          return;
+        }
+        const newOcc = {
+          title: '__PRZECHOWALNIA__',
+          owner_name: newOwnerName.trim(),
+          owner_id: newOwnerId || null,
+          creator_id: user.id,
+          date: '2099-12-31',
+          is_draft: false,
+          invited_user_ids: Object.keys(profiles),
+          created_at: new Date().toISOString()
+        };
+        const { data, error } = await supabase
+          .from('gp_occasions')
+          .insert(newOcc)
+          .select('id')
+          .single();
+        if (error || !data) {
+          throw new Error('Błąd podczas tworzenia nowej Przechowalni: ' + error?.message);
+        }
+        destOccasionId = data.id;
+        await fetchOccasions();
+      }
+      const { error: moveGiftsError } = await supabase
+        .from('gp_gifts')
+        .update({ occasion_id: destOccasionId })
+        .in('id', selectedGifts);
+      if (moveGiftsError) {
+        throw new Error('Błąd podczas przenoszenia prezentów: ' + moveGiftsError.message);
+      }
+      const surprisesToMove = allSurprises.filter(s => selectedGifts.includes(s.id));
+      if (surprisesToMove.length > 0) {
+        const giftsToInsert = surprisesToMove.map(s => ({
+          occasion_id: destOccasionId,
+          name: s.name,
+          description: s.description,
+          price: s.price || null,
+          url: s.url || null,
+          urls: s.urls || null,
+          suggested_by: s.suggested_by || user.id,
+          created_at: new Date().toISOString()
+        }));
+        const { error: insertSurprisesError } = await supabase
+          .from('gp_gifts')
+          .insert(giftsToInsert);
+        if (insertSurprisesError) {
+          throw new Error('Błąd podczas przenoszenia niespodzianek: ' + insertSurprisesError.message);
+        }
+        const { error: deleteSurprisesError } = await supabase
+          .from('gp_surprises')
+          .delete()
+          .in('id', surprisesToMove.map(s => s.id));
+        if (deleteSurprisesError) {
+          throw new Error('Błąd podczas usuwania przeniesionych niespodzianek: ' + deleteSurprisesError.message);
+        }
+      }
+      setToast({ message: 'Pomyślnie przeniesiono prezenty do Przechowalni', type: 'success' });
+      setSelectedGifts([]);
+      setShowMoveModal(false);
+      setMoveTargetId('');
+      setMoveNewOwnerName('');
+      setMoveNewOwnerId('');
+      if (activeOccasion) {
+        await fetchGifts(activeOccasion.id);
+        await fetchSurprises(activeOccasion.id);
+      }
+      await fetchAllGifts();
+      await fetchAllSurprises();
+    } catch (err: any) {
+      setToast({ message: err.message || 'Wystąpił błąd', type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateLocker = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newLockerOwnerName.trim()) {
+      setToast({ message: 'Imię właściciela jest wymagane!', type: 'error' });
+      return;
+    }
+    setLoading(true);
+    const newOcc = {
+      title: '__PRZECHOWALNIA__',
+      owner_name: newLockerOwnerName.trim(),
+      owner_id: newLockerOwnerId || null,
+      creator_id: user.id,
+      date: '2099-12-31',
+      is_draft: false,
+      invited_user_ids: Object.keys(profiles),
+      created_at: new Date().toISOString()
+    };
+    const { data, error } = await supabase
+      .from('gp_occasions')
+      .insert(newOcc)
+      .select('*')
+      .single();
+    if (error || !data) {
+      setToast({ message: 'Nie udało się utworzyć Przechowalni: ' + error?.message, type: 'error' });
+    } else {
+      setToast({ message: 'Przechowalnia została utworzona!', type: 'success' });
+      setShowCreateLockerModal(false);
+      setNewLockerOwnerName('');
+      setNewLockerOwnerId('');
+      await fetchOccasions();
+      setActiveOccasion(data);
+      setView('occasion');
+    }
+    setLoading(false);
   };
 
   const handleSavePin = async (e: React.FormEvent) => {
@@ -1392,7 +1596,7 @@ function App() {
   };
 
   // Filter gifts by active tab (Solenizant wishes vs Guest suggestions)
-  const isOwnerActiveOccasion = activeOccasion?.owner_id === user?.id;
+  const isOwnerActiveOccasion = activeOccasion?.owner_id === user?.id || activeOccasion?.title === '__PRZECHOWALNIA__';
   
   // Solenizant tab includes all gifts in public.gp_gifts table.
   const solenizantGifts = gifts;
@@ -1741,149 +1945,225 @@ function App() {
   // Render list of gifts in a compact table view
   const renderGiftsTable = (giftsList: any[], isSurprise: boolean = false) => {
     return (
-      <div className="table-responsive">
-        <table className="compact-table">
-          <thead>
-            <tr>
-              <th>{isSurprise ? 'Niespodzianka' : 'Prezent'}</th>
-              {isSurprise && <th>Zaproponował</th>}
-              {!isSurprise && <th>Cena</th>}
-              {!isSurprise && <th>Rezerwujący</th>}
-              {isSurprise && <th>Głosowanie</th>}
-              <th>Czat</th>
-              <th style={{ textAlign: 'right' }}>
-                <span className="hide-mobile">Szczegóły</span>
-                <span className="show-mobile-inline">...</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {giftsList.map(gift => {
-              const giftBookings = bookings.filter(b => isSurprise ? b.surprise_id === gift.id : b.gift_id === gift.id);
-              const approvedBooking = giftBookings.find(b => b.is_approved);
-              const isBoughtBySomeoneElse = !isOwnerActiveOccasion && approvedBooking && approvedBooking.user_id !== user?.id;
-              const approvedBuyerName = approvedBooking 
-                ? (profiles[approvedBooking.user_id]?.display_name || 'Znajomy')
-                : 'Ktoś inny';
+      <div>
+        {selectedGifts.length > 0 && (
+          <div 
+            className="glass-panel" 
+            style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center', 
+              padding: '0.75rem 1.25rem', 
+              marginBottom: '1rem', 
+              background: 'rgba(124, 58, 237, 0.15)', 
+              border: '1px solid rgba(124, 58, 237, 0.3)',
+              borderRadius: '12px',
+              animation: 'slideDown 0.2s ease-out'
+            }}
+          >
+            <span style={{ fontWeight: 600, color: '#e0b0ff' }}>
+              Zaznaczono: {selectedGifts.length} {selectedGifts.length === 1 ? 'prezent' : (selectedGifts.length < 5 ? 'prezenty' : 'prezentów')}
+            </span>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button 
+                className="btn btn-secondary" 
+                style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem', borderColor: 'rgba(124, 58, 237, 0.4)' }}
+                onClick={() => {
+                  setMoveTargetId('');
+                  setMoveNewOwnerName('');
+                  setMoveNewOwnerId('');
+                  setShowMoveModal(true);
+                }}
+              >
+                📦 Przenieś do Przechowalni
+              </button>
+              <button 
+                className="btn btn-danger" 
+                style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
+                onClick={handleDeleteGiftsBulk}
+              >
+                🗑️ Usuń zaznaczone
+              </button>
+            </div>
+          </div>
+        )}
 
-              const suggestedByName = profiles[gift.suggested_by || '']?.display_name || 'Solenizant';
-              
-              const isApprovedByMe = !isSurprise && approvedBooking && approvedBooking.user_id === user?.id;
+        <div className="table-responsive">
+          <table className="compact-table">
+            <thead>
+              <tr>
+                <th style={{ width: '40px', textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                  <input 
+                    type="checkbox"
+                    checked={giftsList.length > 0 && giftsList.every(g => selectedGifts.includes(g.id))}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      if (checked) {
+                        const toAdd = giftsList.map(g => g.id);
+                        setSelectedGifts(prev => Array.from(new Set([...prev, ...toAdd])));
+                      } else {
+                        const toRemove = giftsList.map(g => g.id);
+                        setSelectedGifts(prev => prev.filter(id => !toRemove.includes(id)));
+                      }
+                    }}
+                    style={{ transform: 'scale(1.2)', cursor: 'pointer' }}
+                  />
+                </th>
+                <th>{isSurprise ? 'Niespodzianka' : 'Prezent'}</th>
+                {isSurprise && <th>Zaproponował</th>}
+                {!isSurprise && <th>Cena</th>}
+                {!isSurprise && activeOccasion?.title !== '__PRZECHOWALNIA__' && <th>Rezerwujący</th>}
+                {isSurprise && <th>Głosowanie</th>}
+                <th>Czat</th>
+                <th style={{ textAlign: 'right' }}>
+                  <span className="hide-mobile">Szczegóły</span>
+                  <span className="show-mobile-inline">...</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {giftsList.map(gift => {
+                const giftBookings = bookings.filter(b => isSurprise ? b.surprise_id === gift.id : b.gift_id === gift.id);
+                const approvedBooking = giftBookings.find(b => b.is_approved);
+                const isBoughtBySomeoneElse = !isOwnerActiveOccasion && approvedBooking && approvedBooking.user_id !== user?.id;
+                const approvedBuyerName = approvedBooking 
+                  ? (profiles[approvedBooking.user_id]?.display_name || 'Znajomy')
+                  : 'Ktoś inny';
 
-              const bookersCount = giftBookings.length;
-              const bookersList = giftBookings
-                .map(b => profiles[b.user_id]?.display_name || 'Znajomy')
-                .join(', ');
-              const bookersText = bookersCount > 0 ? `${bookersCount} (${bookersList})` : '—';
-              
-              const chatStats = getGiftChatStats(gift.id, isSurprise);
-              const firstUrl = gift.urls && gift.urls.length > 0 && gift.urls[0].url ? gift.urls[0].url : gift.url;
+                const suggestedByName = profiles[gift.suggested_by || '']?.display_name || 'Solenizant';
+                
+                const isApprovedByMe = !isSurprise && approvedBooking && approvedBooking.user_id === user?.id;
 
-              return (
-                <tr 
-                  key={gift.id} 
-                  style={{
-                    cursor: 'pointer',
-                    ...(isApprovedByMe ? { color: '#fbbf24' } : {}),
-                    ...(isBoughtBySomeoneElse ? { 
-                      opacity: 0.55, 
-                      filter: 'grayscale(100%)', 
-                      background: 'rgba(255, 255, 255, 0.01)',
-                      color: 'var(--text-secondary)'
-                    } : {})
-                  }}
-                  onClick={() => {
-                    if (isSurprise) {
-                      setActiveSurpriseDetails(gift);
-                    } else {
-                      setActiveGiftDetails(gift);
-                    }
-                  }}
-                >
-                  <td data-label={isSurprise ? 'Niespodzianka' : 'Prezent'} style={{ fontWeight: 500, color: isApprovedByMe ? '#fbbf24' : 'inherit' }}>
-                    {firstUrl ? (
-                      <a 
-                        href={firstUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer" 
-                        onClick={(e) => e.stopPropagation()} 
-                        style={{ 
-                          color: isApprovedByMe ? '#fbbf24' : 'var(--primary)', 
-                          textDecoration: 'underline' 
+                const bookersCount = giftBookings.length;
+                const bookersList = giftBookings
+                  .map(b => profiles[b.user_id]?.display_name || 'Znajomy')
+                  .join(', ');
+                const bookersText = bookersCount > 0 ? `${bookersCount} (${bookersList})` : '—';
+                
+                const chatStats = getGiftChatStats(gift.id, isSurprise);
+                const firstUrl = gift.urls && gift.urls.length > 0 && gift.urls[0].url ? gift.urls[0].url : gift.url;
+
+                return (
+                  <tr 
+                    key={gift.id} 
+                    style={{
+                      cursor: 'pointer',
+                      ...(isApprovedByMe ? { color: '#fbbf24' } : {}),
+                      ...(isBoughtBySomeoneElse ? { 
+                        opacity: 0.55, 
+                        filter: 'grayscale(100%)', 
+                        background: 'rgba(255, 255, 255, 0.01)',
+                        color: 'var(--text-secondary)'
+                      } : {})
+                    }}
+                    onClick={() => {
+                      if (isSurprise) {
+                        setActiveSurpriseDetails(gift);
+                      } else {
+                        setActiveGiftDetails(gift);
+                      }
+                    }}
+                  >
+                    <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                      <input 
+                        type="checkbox"
+                        checked={selectedGifts.includes(gift.id)}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          if (checked) {
+                            setSelectedGifts(prev => [...prev, gift.id]);
+                          } else {
+                            setSelectedGifts(prev => prev.filter(id => id !== gift.id));
+                          }
                         }}
-                      >
-                        {gift.name}
-                      </a>
-                    ) : (
-                      gift.name
-                    )}{' '}
-                    {isBoughtBySomeoneElse && <span style={{ fontSize: '0.75rem', fontWeight: 'normal', fontStyle: 'italic', marginLeft: '0.4rem', color: 'var(--text-secondary)' }}>(Kupuje: {approvedBuyerName})</span>}
-                  </td>
-                  {isSurprise && (
-                    <td data-label="Zaproponował" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                      👤 {suggestedByName}
+                        style={{ transform: 'scale(1.2)', cursor: 'pointer' }}
+                      />
                     </td>
-                  )}
-                  {!isSurprise && (
-                    <td data-label="Cena" style={{ whiteSpace: 'nowrap', color: isApprovedByMe ? '#fbbf24' : 'inherit' }}>
-                      {gift.price ? <strong style={{ color: isApprovedByMe ? '#fbbf24' : (isBoughtBySomeoneElse ? 'var(--text-secondary)' : 'var(--text-primary)') }}>{gift.price} zł</strong> : <span style={{ color: 'var(--text-secondary)' }}>—</span>}
+                    <td data-label={isSurprise ? 'Niespodzianka' : 'Prezent'} style={{ fontWeight: 500, color: isApprovedByMe ? '#fbbf24' : 'inherit' }}>
+                      {firstUrl ? (
+                        <a 
+                          href={firstUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          onClick={(e) => e.stopPropagation()} 
+                          style={{ 
+                            color: isApprovedByMe ? '#fbbf24' : 'var(--primary)', 
+                            textDecoration: 'underline' 
+                          }}
+                        >
+                          {gift.name}
+                        </a>
+                      ) : (
+                        gift.name
+                      )}{' '}
+                      {isBoughtBySomeoneElse && <span style={{ fontSize: '0.75rem', fontWeight: 'normal', fontStyle: 'italic', marginLeft: '0.4rem', color: 'var(--text-secondary)' }}>(Kupuje: {approvedBuyerName})</span>}
                     </td>
-                  )}
-                  {!isSurprise && (
-                    <td data-label="Rezerwujący" style={{ color: isApprovedByMe ? '#fbbf24' : 'inherit' }}>
-                      {bookersText}
+                    {isSurprise && (
+                      <td data-label="Zaproponował" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                        👤 {suggestedByName}
+                      </td>
+                    )}
+                    {!isSurprise && (
+                      <td data-label="Cena" style={{ whiteSpace: 'nowrap', color: isApprovedByMe ? '#fbbf24' : 'inherit' }}>
+                        {gift.price ? <strong style={{ color: isApprovedByMe ? '#fbbf24' : (isBoughtBySomeoneElse ? 'var(--text-secondary)' : 'var(--text-primary)') }}>{gift.price} zł</strong> : <span style={{ color: 'var(--text-secondary)' }}>—</span>}
+                      </td>
+                    )}
+                    {!isSurprise && activeOccasion?.title !== '__PRZECHOWALNIA__' && (
+                      <td data-label="Rezerwujący" style={{ color: isApprovedByMe ? '#fbbf24' : 'inherit' }}>
+                        {bookersText}
+                      </td>
+                    )}
+                    {isSurprise && (
+                      <td data-label="Głosowanie" onClick={(e) => e.stopPropagation()}>
+                        <button 
+                          className={`btn ${hasUserVoted(gift.id, true) ? 'btn-primary' : 'btn-secondary'}`} 
+                          style={{ 
+                            padding: '0.25rem 0.5rem', 
+                            fontSize: '0.8rem', 
+                            display: 'inline-flex', 
+                            alignItems: 'center', 
+                            gap: '0.3rem',
+                            borderRadius: '6px'
+                          }}
+                          onClick={() => hasUserVoted(gift.id, true) ? handleUnvote(gift.id, true) : handleVote(gift.id, true)}
+                          disabled={isBoughtBySomeoneElse}
+                        >
+                          👍 {getVoteCount(gift.id, true)}
+                        </button>
+                      </td>
+                    )}
+                    <td data-label="Czat" onClick={(e) => {
+                      e.stopPropagation();
+                      if (activeTab !== 'chat') {
+                        setCameFromTab(activeTab);
+                      }
+                      setChatFilter(isSurprise ? `surprise:${gift.id}` : `gift:${gift.id}`);
+                      setActiveTab('chat');
+                      updateLastRead(isSurprise ? `surprise:${gift.id}` : `gift:${gift.id}`);
+                    }} style={{ color: isApprovedByMe ? '#fbbf24' : 'inherit', whiteSpace: 'nowrap' }}>
+                      💬 {chatStats.totalCount} {chatStats.unreadCount > 0 ? <span style={{ color: '#f87171', fontWeight: 'bold' }}>({chatStats.unreadCount})</span> : ''}
                     </td>
-                  )}
-                  {isSurprise && (
-                    <td data-label="Głosowanie" onClick={(e) => e.stopPropagation()}>
+                    <td data-label="Szczegóły" style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                       <button 
-                        className={`btn ${hasUserVoted(gift.id, true) ? 'btn-primary' : 'btn-secondary'}`} 
-                        style={{ 
-                          padding: '0.25rem 0.5rem', 
-                          fontSize: '0.8rem', 
-                          display: 'inline-flex', 
-                          alignItems: 'center', 
-                          gap: '0.3rem',
-                          borderRadius: '6px'
+                        className="btn btn-secondary" 
+                        style={{ padding: '0.3rem 0.6rem', fontSize: '0.85rem', fontWeight: 'bold' }} 
+                        onClick={() => {
+                          if (isSurprise) {
+                            setActiveSurpriseDetails(gift);
+                          } else {
+                            setActiveGiftDetails(gift);
+                          }
                         }}
-                        onClick={() => hasUserVoted(gift.id, true) ? handleUnvote(gift.id, true) : handleVote(gift.id, true)}
-                        disabled={isBoughtBySomeoneElse}
                       >
-                        👍 {getVoteCount(gift.id, true)}
+                        ...
                       </button>
                     </td>
-                  )}
-                  <td data-label="Czat" onClick={(e) => {
-                    e.stopPropagation();
-                    if (activeTab !== 'chat') {
-                      setCameFromTab(activeTab);
-                    }
-                    setChatFilter(isSurprise ? `surprise:${gift.id}` : `gift:${gift.id}`);
-                    setActiveTab('chat');
-                    updateLastRead(isSurprise ? `surprise:${gift.id}` : `gift:${gift.id}`);
-                  }} style={{ color: isApprovedByMe ? '#fbbf24' : 'inherit', whiteSpace: 'nowrap' }}>
-                    💬 {chatStats.totalCount} {chatStats.unreadCount > 0 ? <span style={{ color: '#f87171', fontWeight: 'bold' }}>({chatStats.unreadCount})</span> : ''}
-                  </td>
-                  <td data-label="Szczegóły" style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
-                    <button 
-                      className="btn btn-secondary" 
-                      style={{ padding: '0.3rem 0.6rem', fontSize: '0.85rem', fontWeight: 'bold' }} 
-                      onClick={() => {
-                        if (isSurprise) {
-                          setActiveSurpriseDetails(gift);
-                        } else {
-                          setActiveGiftDetails(gift);
-                        }
-                      }}
-                    >
-                      ...
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     );
   };
@@ -2109,6 +2389,24 @@ function App() {
               <span className="hide-mobile">!</span>
             </span>
             <button 
+              className={`btn ${view === 'przechowalnia' ? 'btn-primary' : 'btn-secondary'}`} 
+              style={{ 
+                padding: '0.5rem 1rem', 
+                fontSize: '0.85rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem'
+              }} 
+              onClick={() => {
+                setView('przechowalnia');
+                setActiveOccasion(null);
+              }}
+            >
+              <span>📦</span>
+              <span className="hide-mobile">Przechowalnia</span>
+              <span className="show-mobile-inline">Przechowalnia</span>
+            </button>
+            <button 
               className={`btn ${view === 'my-bookings' ? 'btn-primary' : 'btn-secondary'}`} 
               style={{ 
                 padding: '0.5rem 1rem', 
@@ -2183,6 +2481,7 @@ function App() {
 
   const upcomingOccasions = occasions
     .filter(isUserInvited)
+    .filter(occ => occ.title !== '__PRZECHOWALNIA__')
     .filter(occ => {
       const { isPast, isArchived } = getOccasionCategory(occ);
       return !isPast && !isArchived;
@@ -2190,6 +2489,7 @@ function App() {
 
   const archivedOrPastOccasions = occasions
     .filter(isUserInvited)
+    .filter(occ => occ.title !== '__PRZECHOWALNIA__')
     .filter(occ => {
       const { isPast, isArchived } = getOccasionCategory(occ);
       return isPast || isArchived;
@@ -2201,10 +2501,12 @@ function App() {
     const list: { owner_name: string; owner_id: string }[] = [];
     const keys = new Set<string>();
     occasions.forEach(occ => {
+      if (occ.title === '__PRZECHOWALNIA__') return;
       if (!occ.owner_name) return;
       const name = occ.owner_name.trim();
       const id = occ.owner_id || '';
       const key = `${name.toLowerCase()}||${id}`;
+      if (hiddenSolenizants.includes(key)) return;
       if (!keys.has(key)) {
         keys.add(key);
         list.push({ owner_name: name, owner_id: id });
@@ -2815,6 +3117,116 @@ function App() {
         </main>
       )}
 
+      {/* ----------------- PRZECHOWALNIA VIEW ----------------- */}
+      {view === 'przechowalnia' && (() => {
+        const lockerOccasions = occasions.filter(occ => occ.title === '__PRZECHOWALNIA__');
+        return (
+          <main className="container">
+            <div className="dashboard-header">
+              <div>
+                <h1>Przechowalnia</h1>
+                <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
+                  Twórz listy życzeń dla dowolnej osoby bez przypisania do wydarzenia w kalendarzu.
+                </p>
+              </div>
+              <div>
+                <button className="btn btn-primary" onClick={() => setShowCreateLockerModal(true)}>
+                  ➕ Utwórz Listę
+                </button>
+              </div>
+            </div>
+
+            {loading && <div style={{ textAlign: 'center', padding: '2rem' }}>Ładowanie Przechowalni...</div>}
+
+            {!loading && lockerOccasions.length === 0 && (
+              <div className="glass-panel empty-state">
+                <div className="empty-state-icon">📦</div>
+                <h3>Brak list w Przechowalni</h3>
+                <p style={{ marginBottom: '1.5rem' }}>
+                  Nie utworzono jeszcze żadnej listy życzeń w Przechowalni.
+                </p>
+                <button className="btn btn-primary" onClick={() => setShowCreateLockerModal(true)}>
+                  Utwórz pierwszą listę
+                </button>
+              </div>
+            )}
+
+            {!loading && lockerOccasions.length > 0 && (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                gap: '1.5rem',
+                marginTop: '1.5rem'
+              }}>
+                {lockerOccasions.map(occ => {
+                  const itemsCount = allGifts.filter(g => g.occasion_id === occ.id).length;
+                  const creatorName = profiles[occ.creator_id]?.display_name || 'Użytkownik';
+                  return (
+                    <div 
+                      key={occ.id}
+                      className="glass-panel"
+                      style={{
+                        padding: '1.5rem',
+                        cursor: 'pointer',
+                        transition: 'transform 0.2s, box-shadow 0.2s',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        minHeight: '160px',
+                        border: '1px solid rgba(255, 255, 255, 0.08)'
+                      }}
+                      onClick={() => {
+                        setActiveOccasion(occ);
+                        setView('occasion');
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-4px)';
+                        e.currentTarget.style.boxShadow = '0 12px 20px rgba(0, 0, 0, 0.2)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'none';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }}
+                    >
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+                          <span style={{ fontSize: '1.5rem' }}>📦</span>
+                          <span style={{ 
+                            fontSize: '0.75rem', 
+                            background: 'rgba(124, 58, 237, 0.15)', 
+                            color: '#e0b0ff',
+                            padding: '0.2rem 0.6rem',
+                            borderRadius: '12px',
+                            border: '1px solid rgba(124, 58, 237, 0.3)'
+                          }}>
+                            {itemsCount} {itemsCount === 1 ? 'prezent' : (itemsCount > 1 && itemsCount < 5 ? 'prezenty' : 'prezentów')}
+                          </span>
+                        </div>
+                        <h3 style={{ margin: '0 0 0.5rem 0', color: 'var(--text-primary)' }}>{occ.owner_name}</h3>
+                        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0 }}>
+                          Stworzona przez: {creatorName}
+                        </p>
+                      </div>
+                      
+                      <div style={{ 
+                        display: 'flex', 
+                        justifyContent: 'flex-end', 
+                        marginTop: '1rem',
+                        fontSize: '0.85rem',
+                        color: 'var(--primary)',
+                        fontWeight: 600
+                      }}>
+                        Zobacz listę →
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </main>
+        );
+      })()}
+
       {/* ----------------- DASHBOARD VIEW ----------------- */}
       {view === 'dashboard' && (
         <main className="container">
@@ -2987,23 +3399,30 @@ function App() {
       {/* ----------------- OCCASION VIEW ----------------- */}
       {view === 'occasion' && activeOccasion && (
         <main className="container">
-          <button className="back-link" onClick={() => { setView('dashboard'); setActiveOccasion(null); }}>
-            ← Powrót do pulpitu
+          <button className="back-link" onClick={() => { 
+            if (activeOccasion.title === '__PRZECHOWALNIA__') {
+              setView('przechowalnia');
+            } else {
+              setView('dashboard');
+            }
+            setActiveOccasion(null); 
+          }}>
+            {activeOccasion.title === '__PRZECHOWALNIA__' ? '← Powrót do Przechowalni' : '← Powrót do pulpitu'}
           </button>
 
-           {activeOccasion.is_draft && (
+          {activeOccasion.title !== '__PRZECHOWALNIA__' && activeOccasion.is_draft && (
             <div className="alert alert-warning" style={{ marginBottom: '1.5rem', background: 'rgba(245, 158, 11, 0.15)', color: '#fba524', borderColor: 'rgba(245, 158, 11, 0.2)' }}>
               🛠️ To wydarzenie jest w wersji roboczej (widoczne tylko dla organizatorów).
             </div>
           )}
 
-          {activeOccasion.is_archived && (
+          {activeOccasion.title !== '__PRZECHOWALNIA__' && activeOccasion.is_archived && (
             <div className="alert alert-danger" style={{ marginBottom: '1.5rem' }}>
               🗄️ To wydarzenie jest zarchiwizowane.
             </div>
           )}
 
-          {(() => {
+          {activeOccasion.title !== '__PRZECHOWALNIA__' && (() => {
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             const target = new Date(activeOccasion.date);
@@ -3019,34 +3438,42 @@ function App() {
           <div className="glass-panel occasion-details-header">
             <div className="occasion-title-row">
               <div>
-                <div className="occasion-date">
-                  📅 {formatDate(activeOccasion.date)} 
-                  {activeOccasion.time && ` o ${activeOccasion.time}`} 
-                  {` (${getDaysLeft(activeOccasion.date)})`}
-                </div>
-                <h1 style={{ margin: '0 0 0.5rem 0' }}>{activeOccasion.title}</h1>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginBottom: '0.75rem' }}>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: '1.05rem' }}>
-                    Okazja dla: <strong>{activeOccasion.owner_name}</strong> {isOwnerActiveOccasion && '(Ciebie)'}
-                  </span>
-                  {(activeOccasion.location || activeOccasion.google_maps_url) && (
-                    <span style={{ fontSize: '0.95rem', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-                      📍 Lokalizacja: {activeOccasion.location || 'Brak nazwy'}
-                      {activeOccasion.google_maps_url && (
-                        <a 
-                          href={activeOccasion.google_maps_url} 
-                          target="_blank" 
-                          rel="noopener noreferrer" 
-                          className="gift-link-tag" 
-                          style={{ marginLeft: '0.5rem', padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                        >
-                          🗺️ Zobacz w Google Maps
-                        </a>
-                      )}
+                {activeOccasion.title !== '__PRZECHOWALNIA__' && (
+                  <div className="occasion-date">
+                    📅 {formatDate(activeOccasion.date)} 
+                    {activeOccasion.time && ` o ${activeOccasion.time}`} 
+                    {` (${getDaysLeft(activeOccasion.date)})`}
+                  </div>
+                )}
+                <h1 style={{ margin: '0 0 0.5rem 0' }}>
+                  {activeOccasion.title === '__PRZECHOWALNIA__' ? `Lista życzeń: ${activeOccasion.owner_name}` : activeOccasion.title}
+                </h1>
+                
+                {activeOccasion.title !== '__PRZECHOWALNIA__' ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginBottom: '0.75rem' }}>
+                    <span style={{ color: 'var(--text-secondary)', fontSize: '1.05rem' }}>
+                      Okazja dla: <strong>{activeOccasion.owner_name}</strong> {isOwnerActiveOccasion && '(Ciebie)'}
                     </span>
-                  )}
-                </div>
-                {activeOccasion.description && (
+                    {(activeOccasion.location || activeOccasion.google_maps_url) && (
+                      <span style={{ fontSize: '0.95rem', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                        📍 Lokalizacja: {activeOccasion.location || 'Brak nazwy'}
+                        {activeOccasion.google_maps_url && (
+                          <a 
+                            href={activeOccasion.google_maps_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="gift-link-tag" 
+                            style={{ marginLeft: '0.5rem', padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                          >
+                            🗺️ Zobacz w Google Maps
+                          </a>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                ) : null}
+                
+                {activeOccasion.title !== '__PRZECHOWALNIA__' && activeOccasion.description && (
                   <p style={{ marginTop: '1rem', fontStyle: 'italic', color: 'var(--text-secondary)' }}>
                     "{activeOccasion.description}"
                   </p>
@@ -3055,7 +3482,7 @@ function App() {
               <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
                 {activeOccasion.creator_id === user.id && (
                   <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', overflow: 'hidden', maxWidth: '100%' }}>
-                    {activeOccasion.is_draft && (
+                    {activeOccasion.title !== '__PRZECHOWALNIA__' && activeOccasion.is_draft && (
                       <button 
                         className="btn btn-secondary" 
                         style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem', border: '1px solid var(--accent-green)', color: 'var(--accent-green)', flexShrink: 0 }} 
@@ -3067,55 +3494,59 @@ function App() {
                     <button className="btn btn-secondary" style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem', flexShrink: 0 }} onClick={() => startEditOccasion(activeOccasion)}>
                       ✏️ Edytuj
                     </button>
-                    <button className="btn btn-secondary" style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem', flexShrink: 0 }} onClick={() => handleToggleArchiveOccasion(activeOccasion)}>
-                      {activeOccasion.is_archived ? '🗄️ Przywróć' : '🗄️ Zarchiwizuj'}
-                    </button>
+                    {activeOccasion.title !== '__PRZECHOWALNIA__' && (
+                      <button className="btn btn-secondary" style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem', flexShrink: 0 }} onClick={() => handleToggleArchiveOccasion(activeOccasion)}>
+                        {activeOccasion.is_archived ? '🗄️ Przywróć' : '🗄️ Zarchiwizuj'}
+                      </button>
+                    )}
                     <button className="btn btn-danger btn-secondary" style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem', flexShrink: 0 }} onClick={(e) => handleDeleteOccasion(activeOccasion.id, e)}>
                       🗑️ Usuń
                     </button>
                   </div>
                 )}
-                <button className="btn btn-primary" style={{ flexShrink: 0 }} onClick={() => openGiftModal(activeTab === 'goscie')}>
-                  {activeTab === 'goscie' ? '🎉 Zaproponuj Niespodziankę' : '🎁 Dodaj Prezent'}
+                <button className="btn btn-primary" style={{ flexShrink: 0 }} onClick={() => openGiftModal(false)}>
+                  🎁 Dodaj Prezent
                 </button>
               </div>
             </div>
           </div>
 
           {/* Surprise Logic Warning or Info */}
-          {isOwnerActiveOccasion && (
+          {activeOccasion.title !== '__PRZECHOWALNIA__' && isOwnerActiveOccasion && (
             <div className="alert alert-success" style={{ marginBottom: '2rem' }}>
               💡 To jest Twoja okazja! Rezerwacje prezentów i pomysły-niespodzianki dodane przez Twoich znajomych są przed Tobą ukryte, by nie psuć niespodzianki.
             </div>
           )}
 
           {/* Navigation Tabs and View Toggle */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.5rem' }}>
-            {!isOwnerActiveOccasion ? (
-              <div className="tab-nav" style={{ margin: 0 }}>
-                <button className={`tab-btn ${activeTab === 'solenizant' ? 'active' : ''}`} onClick={() => setActiveTab('solenizant')}>
-                  <span className="hide-mobile">Lista życzeń {activeOccasion.owner_name}</span>
-                  <span className="show-mobile-inline">Lista życzeń</span> ({solenizantGifts.length})
-                </button>
-                <button className={`tab-btn ${activeTab === 'goscie' ? 'active' : ''}`} onClick={() => setActiveTab('goscie')}>
-                  <span className="hide-mobile">Pomysły i niespodzianki gości</span>
-                  <span className="show-mobile-inline">Niespodzianki</span> ({goscieGifts.length})
-                </button>
-                <button 
-                  className={`tab-btn ${activeTab === 'chat' ? 'active' : ''}`} 
-                  onClick={() => {
-                    setChatFilter('all');
-                    setActiveTab('chat');
-                  }}
-                >
-                  💬 <span className="hide-mobile">Czat i dyskusja</span>
-                  <span className="show-mobile-inline">Czat</span>
-                </button>
-              </div>
-            ) : (
-              <div></div>
-            )}
-          </div>
+          {activeOccasion.title !== '__PRZECHOWALNIA__' && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.5rem' }}>
+              {!isOwnerActiveOccasion ? (
+                <div className="tab-nav" style={{ margin: 0 }}>
+                  <button className={`tab-btn ${activeTab === 'solenizant' ? 'active' : ''}`} onClick={() => setActiveTab('solenizant')}>
+                    <span className="hide-mobile">Lista życzeń {activeOccasion.owner_name}</span>
+                    <span className="show-mobile-inline">Lista życzeń</span> ({solenizantGifts.length})
+                  </button>
+                  <button className={`tab-btn ${activeTab === 'goscie' ? 'active' : ''}`} onClick={() => setActiveTab('goscie')}>
+                    <span className="hide-mobile">Pomysły i niespodzianki gości</span>
+                    <span className="show-mobile-inline">Niespodzianki</span> ({goscieGifts.length})
+                  </button>
+                  <button 
+                    className={`tab-btn ${activeTab === 'chat' ? 'active' : ''}`} 
+                    onClick={() => {
+                      setChatFilter('all');
+                      setActiveTab('chat');
+                    }}
+                  >
+                    💬 <span className="hide-mobile">Czat i dyskusja</span>
+                    <span className="show-mobile-inline">Czat</span>
+                  </button>
+                </div>
+              ) : (
+                <div></div>
+              )}
+            </div>
+          )}
 
           {loading && <div style={{ textAlign: 'center', padding: '2rem' }}>Ładowanie prezentów...</div>}
 
@@ -3479,22 +3910,28 @@ function App() {
         <div className="modal-overlay">
           <div className="glass-panel modal-content" style={{ maxHeight: '90vh', overflowY: 'auto' }}>
             <div className="modal-header">
-              <h2>{editingOccasion ? 'Edytuj wydarzenie' : 'Dodaj nowe wydarzenie'}</h2>
+              <h2>
+                {editingOccasion?.title === '__PRZECHOWALNIA__' 
+                  ? 'Edytuj Przechowalnię' 
+                  : (editingOccasion ? 'Edytuj wydarzenie' : 'Dodaj nowe wydarzenie')}
+              </h2>
               <button className="close-btn" onClick={closeOccasionModal}>×</button>
             </div>
             
             <form onSubmit={handleSaveOccasion}>
-              <div className="form-group">
-                <label>Nazwa Okazji *</label>
-                <input 
-                  type="text" 
-                  className="form-control" 
-                  value={newOccasionTitle} 
-                  onChange={e => setNewOccasionTitle(e.target.value)} 
-                  placeholder="np. 30. urodziny Tomka" 
-                  required 
-                />
-              </div>
+              {newOccasionTitle !== '__PRZECHOWALNIA__' && (
+                <div className="form-group">
+                  <label>Nazwa Okazji *</label>
+                  <input 
+                    type="text" 
+                    className="form-control" 
+                    value={newOccasionTitle} 
+                    onChange={e => setNewOccasionTitle(e.target.value)} 
+                    placeholder="np. 30. urodziny Tomka" 
+                    required 
+                  />
+                </div>
+              )}
 
               <div className="form-group">
                 <label>Dla kogo jest ta okazja? (Solenizant) *</label>
@@ -3514,39 +3951,57 @@ function App() {
                     Szybki wybór z poprzednich okazji:
                   </span>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.35rem' }}>
-                    {pastSolenizants.map((ps, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        style={{
-                          padding: '0.4rem 0.8rem',
-                          fontSize: '0.85rem',
-                          borderRadius: '20px',
-                          background: 'rgba(170, 59, 255, 0.1)',
-                          border: '1px solid rgba(170, 59, 255, 0.3)',
-                          color: '#e0b0ff',
-                          cursor: 'pointer',
-                          transition: 'all 0.2s ease',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.3rem'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = 'rgba(170, 59, 255, 0.25)';
-                          e.currentTarget.style.borderColor = 'rgba(170, 59, 255, 0.5)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background = 'rgba(170, 59, 255, 0.1)';
-                          e.currentTarget.style.borderColor = 'rgba(170, 59, 255, 0.3)';
-                        }}
-                        onClick={() => {
-                          setNewOccasionOwnerName(ps.owner_name);
-                          setNewOccasionOwnerId(ps.owner_id);
-                        }}
-                      >
-                        👤 {ps.owner_name}
-                      </button>
-                    ))}
+                    {pastSolenizants.map((ps, idx) => {
+                      const userProfile = profiles[user?.id];
+                      const isAdmin = userProfile?.is_admin;
+                      return (
+                        <div
+                          key={idx}
+                          style={{
+                            padding: '0.4rem 0.8rem',
+                            fontSize: '0.85rem',
+                            borderRadius: '20px',
+                            background: 'rgba(170, 59, 255, 0.1)',
+                            border: '1px solid rgba(170, 59, 255, 0.3)',
+                            color: '#e0b0ff',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            transition: 'all 0.2s ease'
+                          }}
+                        >
+                          <span 
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => {
+                              setNewOccasionOwnerName(ps.owner_name);
+                              setNewOccasionOwnerId(ps.owner_id);
+                            }}
+                          >
+                            👤 {ps.owner_name}
+                          </span>
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: '#ef4444',
+                                cursor: 'pointer',
+                                padding: '0 0.2rem',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                fontSize: '1rem',
+                                fontWeight: 'bold'
+                              }}
+                              onClick={(e) => handleHideSolenizant(ps, e)}
+                              title="Usuń z podpowiedzi"
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -3568,7 +4023,7 @@ function App() {
                 </p>
               </div>
 
-              {isPastSolenizantSelected && (
+              {newOccasionTitle !== '__PRZECHOWALNIA__' && isPastSolenizantSelected && (
                 <div 
                   className="form-group" 
                   style={{ 
@@ -3610,190 +4065,194 @@ function App() {
                 </div>
               )}
 
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Data wydarzenia *</label>
-                  <input 
-                    type="date" 
-                    className="form-control" 
-                    value={newOccasionDate} 
-                    onChange={e => setNewOccasionDate(e.target.value)} 
-                    required 
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Godzina (opcjonalnie)</label>
-                  <input 
-                    type="time" 
-                    className="form-control" 
-                    value={newOccasionTime} 
-                    onChange={e => setNewOccasionTime(e.target.value)} 
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label>Lokalizacja (opcjonalnie)</label>
-                <input 
-                  type="text" 
-                  className="form-control" 
-                  value={newOccasionLocation} 
-                  onChange={e => setNewOccasionLocation(e.target.value)} 
-                  placeholder="np. Restauracja Pod Gruszą" 
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Link do pinezki Google Maps (opcjonalnie)</label>
-                <input 
-                  type="url" 
-                  className="form-control" 
-                  value={newOccasionGoogleMapsUrl} 
-                  onChange={e => setNewOccasionGoogleMapsUrl(e.target.value)} 
-                  placeholder="https://maps.google.com/..." 
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Status wydarzenia *</label>
-                <div style={{ display: 'flex', gap: '1rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0, textTransform: 'none', cursor: 'pointer', color: 'white' }}>
-                    <input 
-                      type="radio" 
-                      name="is_draft" 
-                      checked={newOccasionIsDraft} 
-                      onChange={() => setNewOccasionIsDraft(true)}
-                      style={{ width: '18px', height: '18px' }}
-                    />
-                    🛠️ Wersja robocza (ukryta przed gośćmi)
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0, textTransform: 'none', cursor: 'pointer', color: 'white' }}>
-                    <input 
-                      type="radio" 
-                      name="is_draft" 
-                      checked={!newOccasionIsDraft} 
-                      onChange={() => setNewOccasionIsDraft(false)}
-                      style={{ width: '18px', height: '18px' }}
-                    />
-                    ✅ Zatwierdzone (widoczne dla gości)
-                  </label>
-                </div>
-              </div>
-
-              {newOccasionIsDraft && (
-                <div className="form-group" style={{ marginTop: '0.75rem' }}>
-                  <label>Kto ma współtworzyć / widzieć tę wersję roboczą?</label>
-                  <div style={{ 
-                    display: 'flex', 
-                    flexDirection: 'column', 
-                    gap: '0.5rem', 
-                    background: 'rgba(0, 0, 0, 0.2)', 
-                    padding: '0.75rem', 
-                    borderRadius: '10px', 
-                    border: '1px solid var(--card-border)',
-                    maxHeight: '120px',
-                    overflowY: 'auto'
-                  }}>
-                    {Object.values(profiles).filter(p => p.id !== user.id).map(p => {
-                      const isChecked = newOccasionDraftAllowedIds.includes(p.id);
-                      return (
-                        <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <input 
-                            type="checkbox" 
-                            id={`draft-invite-${p.id}`}
-                            checked={isChecked}
-                            onChange={e => {
-                              if (e.target.checked) {
-                                setNewOccasionDraftAllowedIds([...newOccasionDraftAllowedIds, p.id]);
-                              } else {
-                                setNewOccasionDraftAllowedIds(newOccasionDraftAllowedIds.filter(id => id !== p.id));
-                              }
-                            }}
-                            style={{ width: '16px', height: '16px', cursor: 'pointer' }}
-                          />
-                          <label 
-                            htmlFor={`draft-invite-${p.id}`} 
-                            style={{ margin: 0, textTransform: 'none', fontSize: '0.9rem', color: 'white', cursor: 'pointer' }}
-                          >
-                            {p.display_name}
-                          </label>
-                        </div>
-                      );
-                    })}
+              {newOccasionTitle !== '__PRZECHOWALNIA__' && (
+                <>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Data wydarzenia *</label>
+                      <input 
+                        type="date" 
+                        className="form-control" 
+                        value={newOccasionDate} 
+                        onChange={e => setNewOccasionDate(e.target.value)} 
+                        required 
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Godzina (opcjonalnie)</label>
+                      <input 
+                        type="time" 
+                        className="form-control" 
+                        value={newOccasionTime} 
+                        onChange={e => setNewOccasionTime(e.target.value)} 
+                      />
+                    </div>
                   </div>
-                </div>
-              )}
 
-              <div className="form-group">
-                <label>Zaproszeni członkowie (kto ma widzieć wydarzenie) *</label>
-                <div style={{ 
-                  display: 'flex', 
-                  flexDirection: 'column', 
-                  gap: '0.5rem', 
-                  background: 'rgba(0, 0, 0, 0.2)', 
-                  padding: '0.75rem', 
-                  borderRadius: '10px', 
-                  border: '1px solid var(--card-border)',
-                  maxHeight: '150px',
-                  overflowY: 'auto'
-                }}>
-                  {Object.values(profiles).map(p => {
-                    const isChecked = newOccasionInvitedIds.includes(p.id);
-                    return (
-                      <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <div className="form-group">
+                    <label>Lokalizacja (opcjonalnie)</label>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      value={newOccasionLocation} 
+                      onChange={e => setNewOccasionLocation(e.target.value)} 
+                      placeholder="np. Restauracja Pod Gruszą" 
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Link do pinezki Google Maps (opcjonalnie)</label>
+                    <input 
+                      type="url" 
+                      className="form-control" 
+                      value={newOccasionGoogleMapsUrl} 
+                      onChange={e => setNewOccasionGoogleMapsUrl(e.target.value)} 
+                      placeholder="https://maps.google.com/..." 
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Status wydarzenia *</label>
+                    <div style={{ display: 'flex', gap: '1rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0, textTransform: 'none', cursor: 'pointer', color: 'white' }}>
                         <input 
-                          type="checkbox" 
-                          id={`invite-${p.id}`}
-                          checked={isChecked}
-                          onChange={e => {
-                            if (e.target.checked) {
-                              setNewOccasionInvitedIds([...newOccasionInvitedIds, p.id]);
-                            } else {
-                              setNewOccasionInvitedIds(newOccasionInvitedIds.filter(id => id !== p.id));
-                            }
-                          }}
-                          style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                          type="radio" 
+                          name="is_draft" 
+                          checked={newOccasionIsDraft} 
+                          onChange={() => setNewOccasionIsDraft(true)}
+                          style={{ width: '18px', height: '18px' }}
                         />
-                        <label 
-                          htmlFor={`invite-${p.id}`} 
-                          style={{ margin: 0, textTransform: 'none', fontSize: '0.9rem', color: 'white', cursor: 'pointer' }}
-                        >
-                          {p.display_name} {p.id === user.id && '(Ty)'}
-                        </label>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.35rem' }}>
-                  <button 
-                    type="button" 
-                    className="btn btn-secondary" 
-                    style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
-                    onClick={() => setNewOccasionInvitedIds(Object.keys(profiles))}
-                  >
-                    Zaznacz wszystkich
-                  </button>
-                  <button 
-                    type="button" 
-                    className="btn btn-secondary" 
-                    style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
-                    onClick={() => setNewOccasionInvitedIds([])}
-                  >
-                    Odznacz wszystkich
-                  </button>
-                </div>
-              </div>
+                        🛠️ Wersja robocza (ukryta przed gośćmi)
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0, textTransform: 'none', cursor: 'pointer', color: 'white' }}>
+                        <input 
+                          type="radio" 
+                          name="is_draft" 
+                          checked={!newOccasionIsDraft} 
+                          onChange={() => setNewOccasionIsDraft(false)}
+                          style={{ width: '18px', height: '18px' }}
+                        />
+                        ✅ Zatwierdzone (widoczne dla gości)
+                      </label>
+                    </div>
+                  </div>
 
-              <div className="form-group">
-                <label>Krótki opis / Uwagi (np. rozmiar ubrań, preferencje)</label>
-                <textarea 
-                  className="form-control" 
-                  rows={3}
-                  value={newOccasionDesc} 
-                  onChange={e => setNewOccasionDesc(e.target.value)} 
-                  placeholder="np. Rozmiar koszulki M, lubi książki kryminalne..."
-                />
-              </div>
+                  {newOccasionIsDraft && (
+                    <div className="form-group" style={{ marginTop: '0.75rem' }}>
+                      <label>Kto ma współtworzyć / widzieć tę wersję roboczą?</label>
+                      <div style={{ 
+                        display: 'flex', 
+                        flexDirection: 'column', 
+                        gap: '0.5rem', 
+                        background: 'rgba(0, 0, 0, 0.2)', 
+                        padding: '0.75rem', 
+                        borderRadius: '10px', 
+                        border: '1px solid var(--card-border)',
+                        maxHeight: '120px',
+                        overflowY: 'auto'
+                      }}>
+                        {Object.values(profiles).filter(p => p.id !== user.id).map(p => {
+                          const isChecked = newOccasionDraftAllowedIds.includes(p.id);
+                          return (
+                            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <input 
+                                type="checkbox" 
+                                id={`draft-invite-${p.id}`}
+                                checked={isChecked}
+                                onChange={e => {
+                                  if (e.target.checked) {
+                                    setNewOccasionDraftAllowedIds([...newOccasionDraftAllowedIds, p.id]);
+                                  } else {
+                                    setNewOccasionDraftAllowedIds(newOccasionDraftAllowedIds.filter(id => id !== p.id));
+                                  }
+                                }}
+                                style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                              />
+                              <label 
+                                htmlFor={`draft-invite-${p.id}`} 
+                                style={{ margin: 0, textTransform: 'none', fontSize: '0.9rem', color: 'white', cursor: 'pointer' }}
+                              >
+                                {p.display_name}
+                              </label>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="form-group">
+                    <label>Zaproszeni członkowie (kto ma widzieć wydarzenie) *</label>
+                    <div style={{ 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: '0.5rem', 
+                      background: 'rgba(0, 0, 0, 0.2)', 
+                      padding: '0.75rem', 
+                      borderRadius: '10px', 
+                      border: '1px solid var(--card-border)',
+                      maxHeight: '150px',
+                      overflowY: 'auto'
+                    }}>
+                      {Object.values(profiles).map(p => {
+                        const isChecked = newOccasionInvitedIds.includes(p.id);
+                        return (
+                          <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <input 
+                              type="checkbox" 
+                              id={`invite-${p.id}`}
+                              checked={isChecked}
+                              onChange={e => {
+                                if (e.target.checked) {
+                                  setNewOccasionInvitedIds([...newOccasionInvitedIds, p.id]);
+                                } else {
+                                  setNewOccasionInvitedIds(newOccasionInvitedIds.filter(id => id !== p.id));
+                                }
+                              }}
+                              style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                            />
+                            <label 
+                              htmlFor={`invite-${p.id}`} 
+                              style={{ margin: 0, textTransform: 'none', fontSize: '0.9rem', color: 'white', cursor: 'pointer' }}
+                            >
+                              {p.display_name} {p.id === user.id && '(Ty)'}
+                            </label>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.35rem' }}>
+                      <button 
+                        type="button" 
+                        className="btn btn-secondary" 
+                        style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                        onClick={() => setNewOccasionInvitedIds(Object.keys(profiles))}
+                      >
+                        Zaznacz wszystkich
+                      </button>
+                      <button 
+                        type="button" 
+                        className="btn btn-secondary" 
+                        style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                        onClick={() => setNewOccasionInvitedIds([])}
+                      >
+                        Odznacz wszystkich
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Krótki opis / Uwagi (np. rozmiar ubrań, preferencje)</label>
+                    <textarea 
+                      className="form-control" 
+                      rows={3}
+                      value={newOccasionDesc} 
+                      onChange={e => setNewOccasionDesc(e.target.value)} 
+                      placeholder="np. Rozmiar koszulki M, lubi książki kryminalne..."
+                    />
+                  </div>
+                </>
+              )}
 
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={closeOccasionModal}>
@@ -4747,6 +5206,248 @@ function App() {
           </div>
         </div>
       )}
+      {/* ----------------- CREATE LOCKER MODAL ----------------- */}
+      {showCreateLockerModal && (
+        <div className="modal-overlay">
+          <div className="glass-panel modal-content" style={{ maxHeight: '90vh', overflowY: 'auto' }}>
+            <div className="modal-header">
+              <h2>Nowa lista w Przechowalni</h2>
+              <button className="close-btn" onClick={() => setShowCreateLockerModal(false)}>×</button>
+            </div>
+            
+            <form onSubmit={handleCreateLocker}>
+              <div className="form-group">
+                <label>Dla kogo jest ta lista? (Właściciel) *</label>
+                <input 
+                  type="text" 
+                  className="form-control" 
+                  value={newLockerOwnerName} 
+                  onChange={e => setNewLockerOwnerName(e.target.value)} 
+                  placeholder="np. Tomek" 
+                  required 
+                />
+              </div>
+
+              {pastSolenizants.length > 0 && (
+                <div style={{ marginTop: '-0.5rem', marginBottom: '1rem' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    Sugerowane z poprzednich okazji:
+                  </span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.35rem' }}>
+                    {pastSolenizants.map((ps, idx) => {
+                      const userProfile = profiles[user?.id];
+                      const isAdmin = userProfile?.is_admin;
+                      return (
+                        <div
+                          key={idx}
+                          style={{
+                            padding: '0.4rem 0.8rem',
+                            fontSize: '0.85rem',
+                            borderRadius: '20px',
+                            background: 'rgba(170, 59, 255, 0.1)',
+                            border: '1px solid rgba(170, 59, 255, 0.3)',
+                            color: '#e0b0ff',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            transition: 'all 0.2s ease'
+                          }}
+                        >
+                          <span 
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => {
+                              setNewLockerOwnerName(ps.owner_name);
+                              setNewLockerOwnerId(ps.owner_id);
+                            }}
+                          >
+                            👤 {ps.owner_name}
+                          </span>
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: '#ef4444',
+                                cursor: 'pointer',
+                                padding: '0 0.2rem',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                fontSize: '1rem',
+                                fontWeight: 'bold'
+                              }}
+                              onClick={(e) => handleHideSolenizant(ps, e)}
+                              title="Usuń z podpowiedzi"
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="form-group">
+                <label>Konto solenizanta w aplikacji (opcjonalnie)</label>
+                <select 
+                  className="form-control"
+                  value={newLockerOwnerId}
+                  onChange={e => setNewLockerOwnerId(e.target.value)}
+                >
+                  <option value="">-- Wybierz profil (lub pozostaw puste) --</option>
+                  {Object.values(profiles).map(p => (
+                    <option key={p.id} value={p.id}>{p.display_name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowCreateLockerModal(false)}>
+                  Anuluj
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={loading}>
+                  {loading ? 'Tworzenie...' : 'Utwórz listę'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------- MOVE GIFTS MODAL ----------------- */}
+      {showMoveModal && (
+        <div className="modal-overlay">
+          <div className="glass-panel modal-content" style={{ maxHeight: '90vh', overflowY: 'auto' }}>
+            <div className="modal-header">
+              <h2>Przenieś prezenty do Przechowalni</h2>
+              <button className="close-btn" onClick={() => setShowMoveModal(false)}>×</button>
+            </div>
+            
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              await handleMoveGifts(moveTargetId, moveNewOwnerName, moveNewOwnerId);
+            }}>
+              <div className="form-group">
+                <label>Wybierz docelową Przechowalnię</label>
+                <select 
+                  className="form-control"
+                  value={moveTargetId}
+                  onChange={e => setMoveTargetId(e.target.value)}
+                  required
+                >
+                  <option value="">-- Wybierz listę --</option>
+                  {occasions.filter(o => o.title === '__PRZECHOWALNIA__').map(o => (
+                    <option key={o.id} value={o.id}>{o.owner_name}</option>
+                  ))}
+                  <option value="new">-- Utwórz nową listę dla... --</option>
+                </select>
+              </div>
+
+              {moveTargetId === 'new' && (
+                <div style={{ animation: 'fadeIn 0.2s ease' }}>
+                  <div className="form-group">
+                    <label>Dla kogo? (Właściciel nowej listy) *</label>
+                    <input 
+                      type="text" 
+                      className="form-control" 
+                      value={moveNewOwnerName} 
+                      onChange={e => setMoveNewOwnerName(e.target.value)} 
+                      placeholder="np. Tomek" 
+                      required 
+                    />
+                  </div>
+
+                  {pastSolenizants.length > 0 && (
+                    <div style={{ marginTop: '-0.5rem', marginBottom: '1rem' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                        Sugerowane z poprzednich okazji:
+                      </span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.35rem' }}>
+                        {pastSolenizants.map((ps, idx) => {
+                          const userProfile = profiles[user?.id];
+                          const isAdmin = userProfile?.is_admin;
+                          return (
+                            <div
+                              key={idx}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                borderRadius: '20px',
+                                background: 'rgba(170, 59, 255, 0.1)',
+                                border: '1px solid rgba(170, 59, 255, 0.3)',
+                                padding: '0.2rem 0.5rem 0.2rem 0.8rem',
+                                gap: '0.3rem',
+                                color: '#e0b0ff',
+                                fontSize: '0.85rem'
+                              }}
+                            >
+                              <span 
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => {
+                                  setMoveNewOwnerName(ps.owner_name);
+                                  setMoveNewOwnerId(ps.owner_id);
+                                }}
+                              >
+                                👤 {ps.owner_name}
+                              </span>
+                              {isAdmin && (
+                                <button
+                                  type="button"
+                                  style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: '#ef4444',
+                                    cursor: 'pointer',
+                                    padding: '0 0.25rem',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    fontSize: '0.8rem',
+                                    fontWeight: 'bold'
+                                  }}
+                                  onClick={(e) => handleHideSolenizant(ps, e)}
+                                  title="Usuń z podpowiedzi"
+                                >
+                                  ×
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="form-group">
+                    <label>Konto użytkownika w aplikacji (opcjonalnie)</label>
+                    <select 
+                      className="form-control"
+                      value={moveNewOwnerId}
+                      onChange={e => setMoveNewOwnerId(e.target.value)}
+                    >
+                      <option value="">-- Wybierz profil --</option>
+                      {Object.values(profiles).map(p => (
+                        <option key={p.id} value={p.id}>{p.display_name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowMoveModal(false)}>
+                  Anuluj
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={loading}>
+                  {loading ? 'Przenoszenie...' : 'Przenieś'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* ----------------- CONFIRMATION MODAL ----------------- */}
       {confirmModal.show && (
         <div className="modal-overlay" style={{ zIndex: 2000 }}>
