@@ -1721,6 +1721,10 @@ function App() {
 
   // Filter gifts by active tab (Solenizant wishes vs Guest suggestions)
   const isOwnerActiveOccasion = activeOccasion?.owner_id === user?.id || activeOccasion?.title === '__PRZECHOWALNIA__';
+  const isLocker = activeOccasion?.title === '__PRZECHOWALNIA__';
+  const isAdmin = profiles[user?.id || '']?.is_admin;
+  const isLockerCreator = activeOccasion?.creator_id === user?.id;
+  const canEditLocker = !isLocker || isLockerCreator || isAdmin;
   
   // Solenizant tab includes all gifts in public.gp_gifts table.
   const solenizantGifts = gifts;
@@ -2070,7 +2074,7 @@ function App() {
   const renderGiftsTable = (giftsList: any[], isSurprise: boolean = false) => {
     return (
       <div>
-        {selectedGifts.length > 0 && (
+        {selectedGifts.length > 0 && canEditLocker && (
           <div 
             className="glass-panel" 
             style={{ 
@@ -2116,23 +2120,25 @@ function App() {
           <table className="compact-table">
             <thead>
               <tr>
-                <th style={{ width: '40px', textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
-                  <input 
-                    type="checkbox"
-                    checked={giftsList.length > 0 && giftsList.every(g => selectedGifts.includes(g.id))}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      if (checked) {
-                        const toAdd = giftsList.map(g => g.id);
-                        setSelectedGifts(prev => Array.from(new Set([...prev, ...toAdd])));
-                      } else {
-                        const toRemove = giftsList.map(g => g.id);
-                        setSelectedGifts(prev => prev.filter(id => !toRemove.includes(id)));
-                      }
-                    }}
-                    style={{ transform: 'scale(1.2)', cursor: 'pointer' }}
-                  />
-                </th>
+                {canEditLocker && (
+                  <th style={{ width: '40px', textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                    <input 
+                      type="checkbox"
+                      checked={giftsList.length > 0 && giftsList.every(g => selectedGifts.includes(g.id))}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        if (checked) {
+                          const toAdd = giftsList.map(g => g.id);
+                          setSelectedGifts(prev => Array.from(new Set([...prev, ...toAdd])));
+                        } else {
+                          const toRemove = giftsList.map(g => g.id);
+                          setSelectedGifts(prev => prev.filter(id => !toRemove.includes(id)));
+                        }
+                      }}
+                      style={{ transform: 'scale(1.2)', cursor: 'pointer' }}
+                    />
+                  </th>
+                )}
                 <th>{isSurprise ? 'Niespodzianka' : 'Prezent'}</th>
                 {isSurprise && <th>Zaproponował</th>}
                 {!isSurprise && <th>Cena</th>}
@@ -2188,21 +2194,23 @@ function App() {
                       }
                     }}
                   >
-                    <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
-                      <input 
-                        type="checkbox"
-                        checked={selectedGifts.includes(gift.id)}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
-                          if (checked) {
-                            setSelectedGifts(prev => [...prev, gift.id]);
-                          } else {
-                            setSelectedGifts(prev => prev.filter(id => id !== gift.id));
-                          }
-                        }}
-                        style={{ transform: 'scale(1.2)', cursor: 'pointer' }}
-                      />
-                    </td>
+                    {canEditLocker && (
+                      <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                        <input 
+                          type="checkbox"
+                          checked={selectedGifts.includes(gift.id)}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            if (checked) {
+                              setSelectedGifts(prev => [...prev, gift.id]);
+                            } else {
+                              setSelectedGifts(prev => prev.filter(id => id !== gift.id));
+                            }
+                          }}
+                          style={{ transform: 'scale(1.2)', cursor: 'pointer' }}
+                        />
+                      </td>
+                    )}
                     <td data-label={isSurprise ? 'Niespodzianka' : 'Prezent'} style={{ fontWeight: 500, color: isApprovedByMe ? '#fbbf24' : 'inherit' }}>
                       {firstUrl ? (
                         <a 
@@ -3577,7 +3585,7 @@ function App() {
                 )}
               </div>
               <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                {activeOccasion.creator_id === user.id && (
+                {(activeOccasion.creator_id === user.id || profiles[user?.id || '']?.is_admin) && (
                   <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', overflow: 'hidden', maxWidth: '100%' }}>
                     {activeOccasion.title !== '__PRZECHOWALNIA__' && activeOccasion.is_draft && (
                       <button 
@@ -3601,9 +3609,11 @@ function App() {
                     </button>
                   </div>
                 )}
-                <button className="btn btn-primary" style={{ flexShrink: 0 }} onClick={() => openGiftModal(false)}>
-                  🎁 Dodaj Prezent
-                </button>
+                {canEditLocker && (
+                  <button className="btn btn-primary" style={{ flexShrink: 0 }} onClick={() => openGiftModal(false)}>
+                    🎁 Dodaj Prezent
+                  </button>
+                )}
                 {activeOccasion.title !== '__PRZECHOWALNIA__' && (
                   <>
                     <button 
@@ -5045,7 +5055,7 @@ function App() {
               >
                 Zamknij
               </button>
-              {(activeGiftDetails.suggested_by === user?.id || profiles[user?.id]?.is_admin) && (
+              {((activeOccasion?.title === '__PRZECHOWALNIA__' ? (activeOccasion?.creator_id === user?.id || profiles[user?.id || '']?.is_admin) : (activeGiftDetails.suggested_by === user?.id || profiles[user?.id]?.is_admin))) && (
                 <button 
                   type="button" 
                   className="btn btn-secondary" 
@@ -5054,7 +5064,7 @@ function App() {
                   ✏️ Edytuj
                 </button>
               )}
-              {(activeGiftDetails.suggested_by === user?.id || activeOccasion?.creator_id === user?.id || profiles[user?.id]?.is_admin) && (
+              {((activeOccasion?.title === '__PRZECHOWALNIA__' ? (activeOccasion?.creator_id === user?.id || profiles[user?.id || '']?.is_admin) : (activeGiftDetails.suggested_by === user?.id || activeOccasion?.creator_id === user?.id || profiles[user?.id]?.is_admin))) && (
                 <button 
                   type="button" 
                   className="btn btn-danger btn-secondary" 
@@ -5818,7 +5828,12 @@ function App() {
 
       {/* ----------------- IMPORT FROM PAST OCCASION MODAL ----------------- */}
       {showImportFromPastOccasionModal && activeOccasion && (() => {
-        const eventOccasions = occasions.filter(o => o.title !== '__PRZECHOWALNIA__');
+        const todayStr = new Date().toISOString().split('T')[0];
+        const eventOccasions = occasions.filter(o => 
+          o.title !== '__PRZECHOWALNIA__' && 
+          !o.is_draft && 
+          o.date <= todayStr
+        );
         const sortedOccasions = [...eventOccasions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         const selectedOccGifts = allGifts.filter(g => g.occasion_id === importFromOccasionId);
         const unpurchasedGifts = selectedOccGifts.filter(gift => {
