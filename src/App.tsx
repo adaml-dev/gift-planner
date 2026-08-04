@@ -2582,6 +2582,7 @@ function App() {
   };
 
   const isUserInvited = (occ: Occasion) => {
+    if (!user) return false;
     // Creator can always see their own occasions
     if (occ.creator_id === user.id) return true;
 
@@ -3613,7 +3614,7 @@ function App() {
                 )}
               </div>
               <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                {(activeOccasion.creator_id === user.id || profiles[user?.id || '']?.is_admin) && (
+                {(activeOccasion.creator_id === user?.id || profiles[user?.id || '']?.is_admin) && (
                   <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', overflow: 'hidden', maxWidth: '100%' }}>
                     {activeOccasion.title !== '__PRZECHOWALNIA__' && activeOccasion.is_draft && (
                       <button 
