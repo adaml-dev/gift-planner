@@ -110,6 +110,8 @@ function App() {
   const [showOccasionModal, setShowOccasionModal] = useState(false);
   const [editingOccasion, setEditingOccasion] = useState<Occasion | null>(null);
   const [dashboardTab, setDashboardTab] = useState<'przechowalnia' | 'upcoming' | 'archived'>('upcoming');
+  const [hasSetDefaultTab, setHasSetDefaultTab] = useState(false);
+  const [occasionsLoaded, setOccasionsLoaded] = useState(false);
   const [newOccasionTitle, setNewOccasionTitle] = useState('');
   const [newOccasionOwnerName, setNewOccasionOwnerName] = useState('');
   const [newOccasionOwnerId, setNewOccasionOwnerId] = useState('');
@@ -554,6 +556,7 @@ function App() {
       setErrorMsg('Błąd pobierania okazji: ' + error.message);
     } else {
       setOccasions(data || []);
+      setOccasionsLoaded(true);
     }
     setLoading(false);
   };
@@ -2610,6 +2613,31 @@ function App() {
     });
 
   const filteredOccasions = dashboardTab === 'upcoming' ? upcomingOccasions : archivedOrPastOccasions;
+
+  useEffect(() => {
+    if (!user) {
+      setOccasionsLoaded(false);
+      setHasSetDefaultTab(false);
+      setDashboardTab('upcoming');
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (user && occasionsLoaded && !hasSetDefaultTab) {
+      const upcoming = occasions
+        .filter(isUserInvited)
+        .filter(occ => occ.title !== '__PRZECHOWALNIA__')
+        .filter(occ => {
+          const { isPast, isArchived } = getOccasionCategory(occ);
+          return !isPast && !isArchived;
+        });
+
+      if (upcoming.length === 0) {
+        setDashboardTab('przechowalnia');
+      }
+      setHasSetDefaultTab(true);
+    }
+  }, [occasionsLoaded, occasions, user, hasSetDefaultTab]);
 
   const pastSolenizants = (() => {
     const list: { owner_name: string; owner_id: string }[] = [];
