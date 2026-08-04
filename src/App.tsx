@@ -139,6 +139,9 @@ function App() {
   const [addFromLockerLockerId, setAddFromLockerLockerId] = useState('');
   const [showAddFromUnpurchasedModal, setShowAddFromUnpurchasedModal] = useState(false);
   const [addFromUnpurchasedSelectedGifts, setAddFromUnpurchasedSelectedGifts] = useState<string[]>([]);
+  const [showImportFromPastOccasionModal, setShowImportFromPastOccasionModal] = useState(false);
+  const [importFromOccasionId, setImportFromOccasionId] = useState<string>('');
+  const [importSelectedGifts, setImportSelectedGifts] = useState<string[]>([]);
 
   const [showGiftModal, setShowGiftModal] = useState(false);
   const [newGiftName, setNewGiftName] = useState('');
@@ -1090,6 +1093,38 @@ function App() {
       await fetchAllGifts();
     } catch (e: any) {
       setToast({ message: 'Błąd podczas dodawania: ' + e.message, type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddFromPastOccasion = async () => {
+    if (importSelectedGifts.length === 0 || !activeOccasion) return;
+    setLoading(true);
+    try {
+      const selectedItems = allGifts.filter(g => importSelectedGifts.includes(g.id));
+      const giftsToInsert = selectedItems.map(g => ({
+        occasion_id: activeOccasion.id,
+        name: g.name,
+        description: g.description || null,
+        price: g.price || null,
+        url: g.url || null,
+        urls: g.urls || null,
+        suggested_by: user.id,
+        created_at: new Date().toISOString()
+      }));
+      const { error } = await supabase
+        .from('gp_gifts')
+        .insert(giftsToInsert);
+      if (error) throw error;
+      setToast({ message: `Pomyślnie dodano ${giftsToInsert.length} niekupionych prezentów do Przechowalni.`, type: 'success' });
+      setShowImportFromPastOccasionModal(false);
+      setImportSelectedGifts([]);
+      setImportFromOccasionId('');
+      await fetchGifts(activeOccasion.id);
+      await fetchAllGifts();
+    } catch (e: any) {
+      setToast({ message: 'Błąd podczas importowania: ' + e.message, type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -3320,8 +3355,7 @@ function App() {
                         border: '1px solid rgba(255, 255, 255, 0.08)'
                       }}
                       onClick={() => {
-                        setActiveOccasion(occ);
-                        setView('occasion');
+                        selectOccasion(occ);
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.transform = 'translateY(-4px)';
@@ -3600,6 +3634,19 @@ function App() {
                     </button>
                   </>
                 )}
+                {activeOccasion.title === '__PRZECHOWALNIA__' && (
+                  <button 
+                    className="btn btn-secondary" 
+                    style={{ flexShrink: 0 }} 
+                    onClick={() => {
+                      setImportFromOccasionId('');
+                      setImportSelectedGifts([]);
+                      setShowImportFromPastOccasionModal(true);
+                    }}
+                  >
+                    📅 Importuj z minionej imprezy
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -3685,6 +3732,18 @@ function App() {
                               📅 Dodaj z niekupionych
                             </button>
                           </>
+                        )}
+                        {activeOccasion.title === '__PRZECHOWALNIA__' && (
+                          <button 
+                            className="btn btn-secondary" 
+                            onClick={() => {
+                              setImportFromOccasionId('');
+                              setImportSelectedGifts([]);
+                              setShowImportFromPastOccasionModal(true);
+                            }}
+                          >
+                            📅 Importuj z minionej imprezy
+                          </button>
                         )}
                       </div>
                     </div>
@@ -5751,6 +5810,122 @@ function App() {
                 >
                   {loading ? 'Dodawanie...' : `Dodaj zaznaczone (${addFromUnpurchasedSelectedGifts.length})`}
                 </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ----------------- IMPORT FROM PAST OCCASION MODAL ----------------- */}
+      {showImportFromPastOccasionModal && activeOccasion && (() => {
+        const eventOccasions = occasions.filter(o => o.title !== '__PRZECHOWALNIA__');
+        const sortedOccasions = [...eventOccasions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        const selectedOccGifts = allGifts.filter(g => g.occasion_id === importFromOccasionId);
+        const unpurchasedGifts = selectedOccGifts.filter(gift => {
+          const giftBookings = bookings.filter(b => b.gift_id === gift.id);
+          const hasApproved = giftBookings.some(b => b.is_approved);
+          return !hasApproved;
+        });
+
+        return (
+          <div className="modal-overlay">
+            <div className="glass-panel modal-content" style={{ maxHeight: '90vh', overflowY: 'auto', width: '90%', maxWidth: '600px' }}>
+              <div className="modal-header">
+                <h2>Importuj z minionej imprezy</h2>
+                <button className="close-btn" onClick={() => setShowImportFromPastOccasionModal(false)}>×</button>
+              </div>
+
+              <div style={{ marginTop: '1rem' }}>
+                <div className="form-group">
+                  <label htmlFor="import-occasion-select">Wybierz wydarzenie:</label>
+                  <select 
+                    id="import-occasion-select"
+                    className="form-control"
+                    value={importFromOccasionId}
+                    onChange={e => {
+                      setImportFromOccasionId(e.target.value);
+                      setImportSelectedGifts([]);
+                    }}
+                    style={{ background: 'var(--card-bg)', color: 'white', border: '1px solid var(--card-border)' }}
+                  >
+                    <option value="">-- Wybierz wydarzenie --</option>
+                    {sortedOccasions.map(occ => (
+                      <option key={occ.id} value={occ.id}>
+                        {occ.title} ({formatDate(occ.date)}) - solenizant: {occ.owner_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {importFromOccasionId && (
+                  <div style={{ marginTop: '1.5rem' }}>
+                    {unpurchasedGifts.length === 0 ? (
+                      <p style={{ color: 'var(--text-secondary)', textAlign: 'center', margin: '2rem 0' }}>
+                        Brak niekupionych prezentów z tego wydarzenia.
+                      </p>
+                    ) : (
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                            Niekupione prezenty ({unpurchasedGifts.length}):
+                          </span>
+                          <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button 
+                              type="button" 
+                              className="btn btn-secondary" 
+                              style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }} 
+                              onClick={() => setImportSelectedGifts(unpurchasedGifts.map(g => g.id))}
+                            >
+                              Zaznacz wszystkie
+                            </button>
+                            <button 
+                              type="button" 
+                              className="btn btn-secondary" 
+                              style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }} 
+                              onClick={() => setImportSelectedGifts([])}
+                            >
+                              Odznacz wszystkie
+                            </button>
+                          </div>
+                        </div>
+
+                        <div style={{ maxHeight: '350px', overflowY: 'auto', border: '1px solid var(--card-border)', borderRadius: '8px', padding: '0.5rem', background: 'rgba(0,0,0,0.1)', marginBottom: '1.5rem' }}>
+                          {unpurchasedGifts.map(g => (
+                            <label key={g.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.6rem 0.5rem', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.05)', color: 'white', textTransform: 'none', margin: 0 }}>
+                              <input 
+                                type="checkbox"
+                                checked={importSelectedGifts.includes(g.id)}
+                                onChange={e => {
+                                  if (e.target.checked) {
+                                    setImportSelectedGifts([...importSelectedGifts, g.id]);
+                                  } else {
+                                    setImportSelectedGifts(importSelectedGifts.filter(id => id !== g.id));
+                                  }
+                                }}
+                                style={{ width: '18px', height: '18px' }}
+                              />
+                              <div>
+                                <strong>{g.name}</strong>
+                                {g.price ? <span style={{ color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>({g.price} zł)</span> : null}
+                                {g.description ? <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0 0' }}>{g.description}</p> : null}
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+
+                        <button 
+                          type="button" 
+                          className="btn btn-primary" 
+                          style={{ width: '100%' }}
+                          onClick={handleAddFromPastOccasion}
+                          disabled={importSelectedGifts.length === 0 || loading}
+                        >
+                          {loading ? 'Dodawanie...' : `Dodaj wybrane prezenty (${importSelectedGifts.length}) do Przechowalni`}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
