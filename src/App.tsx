@@ -232,6 +232,34 @@ function App() {
   }) : [];
   const myRejectedBookingsCount = myRejectedBookings.length;
 
+  const getOccasionCategory = (occ: Occasion) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const target = new Date(occ.date);
+    target.setHours(0, 0, 0, 0);
+    const isPast = target.getTime() < today.getTime();
+    return {
+      isPast,
+      isArchived: !!occ.is_archived
+    };
+  };
+
+  const isUserInvited = (occ: Occasion) => {
+    if (!user) return false;
+    // Creator can always see their own occasions
+    if (occ.creator_id === user.id) return true;
+
+    // If it's a draft, only the creator and draft_allowed_user_ids can see it
+    if (occ.is_draft) {
+      return occ.draft_allowed_user_ids?.includes(user.id) || false;
+    }
+
+    // Otherwise, normal invited guests logic:
+    if (occ.owner_id === user.id) return true;
+    if (!occ.invited_user_ids) return true; // old events are public by default
+    return occ.invited_user_ids.includes(user.id);
+  };
+
   // 1. Monitor Auth status & Initialize App
   useEffect(() => {
     const initApp = async () => {
@@ -466,6 +494,31 @@ function App() {
       supabase.removeChannel(channel);
     };
   }, [activeOccasion]);
+
+  useEffect(() => {
+    if (!user) {
+      setOccasionsLoaded(false);
+      setHasSetDefaultTab(false);
+      setDashboardTab('upcoming');
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (user && occasionsLoaded && !hasSetDefaultTab) {
+      const upcoming = occasions
+        .filter(isUserInvited)
+        .filter(occ => occ.title !== '__PRZECHOWALNIA__')
+        .filter(occ => {
+          const { isPast, isArchived } = getOccasionCategory(occ);
+          return !isPast && !isArchived;
+        });
+
+      if (upcoming.length === 0) {
+        setDashboardTab('przechowalnia');
+      }
+      setHasSetDefaultTab(true);
+    }
+  }, [occasionsLoaded, occasions, user, hasSetDefaultTab]);
 
   // 4. Sync profile table in DB
   const syncProfile = async (u: any) => {
@@ -2569,34 +2622,6 @@ function App() {
     );
   };
 
-  const getOccasionCategory = (occ: Occasion) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const target = new Date(occ.date);
-    target.setHours(0, 0, 0, 0);
-    const isPast = target.getTime() < today.getTime();
-    return {
-      isPast,
-      isArchived: !!occ.is_archived
-    };
-  };
-
-  const isUserInvited = (occ: Occasion) => {
-    if (!user) return false;
-    // Creator can always see their own occasions
-    if (occ.creator_id === user.id) return true;
-
-    // If it's a draft, only the creator and draft_allowed_user_ids can see it
-    if (occ.is_draft) {
-      return occ.draft_allowed_user_ids?.includes(user.id) || false;
-    }
-
-    // Otherwise, normal invited guests logic:
-    if (occ.owner_id === user.id) return true;
-    if (!occ.invited_user_ids) return true; // old events are public by default
-    return occ.invited_user_ids.includes(user.id);
-  };
-
   const upcomingOccasions = occasions
     .filter(isUserInvited)
     .filter(occ => occ.title !== '__PRZECHOWALNIA__')
@@ -2614,31 +2639,6 @@ function App() {
     });
 
   const filteredOccasions = dashboardTab === 'upcoming' ? upcomingOccasions : archivedOrPastOccasions;
-
-  useEffect(() => {
-    if (!user) {
-      setOccasionsLoaded(false);
-      setHasSetDefaultTab(false);
-      setDashboardTab('upcoming');
-    }
-  }, [user]);
-
-  useEffect(() => {
-    if (user && occasionsLoaded && !hasSetDefaultTab) {
-      const upcoming = occasions
-        .filter(isUserInvited)
-        .filter(occ => occ.title !== '__PRZECHOWALNIA__')
-        .filter(occ => {
-          const { isPast, isArchived } = getOccasionCategory(occ);
-          return !isPast && !isArchived;
-        });
-
-      if (upcoming.length === 0) {
-        setDashboardTab('przechowalnia');
-      }
-      setHasSetDefaultTab(true);
-    }
-  }, [occasionsLoaded, occasions, user, hasSetDefaultTab]);
 
   const pastSolenizants = (() => {
     const list: { owner_name: string; owner_id: string }[] = [];
